@@ -1,0 +1,3 @@
+[submodule ".agent-zero"]
+	path = .agent-zero
+	url = https://github.com/agent-zero-operator/agent-zero.git

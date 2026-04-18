@@ -94,6 +94,27 @@ Most assertions read from A0's source at import time. They look for A0 in:
 
 If none resolve, assertions raise with an actionable message.
 
+## Developing the testkit itself
+
+This repo includes `.agent-zero/` as a **dev-scope submodule** pinned at the
+same commit the first adopter uses, so the testkit can be self-tested in
+isolation. It does NOT affect consumers — their own `.agent-zero` takes
+precedence via the A0-reachability chain above.
+
+```bash
+git clone --recurse-submodules https://github.com/agent-zero-operator/agent-zero-plugin-development-testkit
+cd agent-zero-plugin-development-testkit
+python -m pip install -e ".[fasta2a]" pytest pytest-asyncio
+pytest                           # 9 smoke tests in <100ms
+```
+
+To bump the pinned A0:
+
+```bash
+cd .agent-zero && git checkout <ref> && cd ..
+git add .agent-zero && git commit -m "chore: bump A0 to <ref>"
+```
+
 ## Design principles
 
 - **Scrape, don't hard-code.** Every list of names (extension points, hooks, API attrs) is derived from the live A0 source the testkit is loaded against. Upgrading A0 automatically adjusts the canonical list.
