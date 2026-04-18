@@ -1,7 +1,7 @@
 ---
 name: a0-plugin-testkit
-description: "Shared test scaffolding for Agent Zero plugin repos. Scrapes A0's source at runtime for canonical extension-point IDs, JS hooks, plugin lifecycle hooks, and module attribute names — exposes them as fast pytest assertions. Ships A0 fakes, a live FastA2A fixture, a static validator, a dependency audit, and an A0-API audit. Load whenever building, extending, or debugging tests in any plugin repo that vendors or submodules this testkit."
-version: "0.2.0"
+description: "Shared test scaffolding for Agent Zero plugin repos. Scrapes A0's source at runtime for canonical extension-point IDs, JS hooks, plugin lifecycle hooks, and module attribute names — exposes them as fast pytest assertions. Ships A0 fakes, a live FastA2A fixture, a static validator, a dependency audit, and an A0-API audit. Meant to be actively evolved by consumer repos — load whenever building, extending, debugging, OR contributing back new reusable testing assets."
+version: "0.3.0"
 author: "agent-zero-operator"
 tags: ["plugins", "testing", "testkit", "pytest", "extension-points", "a2a", "hooks"]
 trigger_patterns:
@@ -19,6 +19,9 @@ trigger_patterns:
   - "why is my hook never called"
   - "valid extension point name"
   - "valid plugin hook name"
+  - "contribute to the testkit"
+  - "add a new assertion to the testkit"
+  - "bump testkit submodule"
 ---
 
 # a0-plugin-testkit — shared plugin-test scaffolding
@@ -327,10 +330,12 @@ Rule of thumb: **if you write a fix before you write the test that would have ca
 
 ## Extending the testkit — when to lift vs keep local
 
-Not every helper belongs in the testkit. Lift a helper when it meets **all** of:
+**The testkit is not a black box.** Treat it as a living, shared codebase you're expected to evolve. Every assertion here started as ad-hoc test logic in *some* plugin repo that turned out to generalise; that's the pattern. If you find yourself writing a test whose shape matches another plugin's, you're looking at a testkit contribution.
+
+Lift a helper when it meets **all** of:
 
 - It doesn't reference plugin-domain symbols (no `livekit_*`, no `compact_*`, etc.).
-- A second plugin has already hit the same need (YAGNI applied to the testkit itself).
+- A second plugin has already hit the same need (or clearly will — YAGNI applied to the testkit itself, but don't be a miser).
 - The API is simple enough to stabilise — no heavy configuration surface.
 
 Stays plugin-local when:
@@ -340,6 +345,93 @@ Stays plugin-local when:
 - It's a business-logic unit test.
 
 If in doubt, keep it plugin-local — refactoring later is cheap; extracting then re-extracting is not.
+
+---
+
+## Contributing back — the spontaneous-contribution workflow
+
+A submodule-based distribution has a nice property: **you contribute to the testkit from inside your consumer plugin repo, without cloning the testkit separately.** Edit the files in `tests/_testkit/`, commit, PR, merge, bump the submodule pointer — the testkit evolves at the pace plugin authors discover things.
+
+### Before you start
+
+- **Red-first.** The new helper/assertion must come with a test that would fail against the current code. If the pattern doesn't have at least one concrete bug (in your plugin or another) it would catch, it's not ready. Paste the red output in the PR description.
+- **Keep the `a0_plugin_testkit` public API stable.** New modules and new functions are fine. Renaming existing ones is a breaking change for every consumer repo — avoid unless you're doing a major version bump and sending PRs to the consumers too.
+- **Update the skill + README in the same PR.** If you add an assertion, `skill/SKILL.md` needs a row in the reference-flow table and a bullet under Capabilities. `README.md`'s "What's in the box" needs the new name. A helper that ships without discoverability documentation effectively doesn't exist.
+
+### Step-by-step: edit, PR, merge, bump
+
+```bash
+# ── 1. Enter the submodule. It's in detached-HEAD state by default —
+#     create a branch BEFORE editing or your commits will be orphaned.
+cd tests/_testkit
+git checkout -b feature/new-helper-name
+
+# ── 2. Edit the testkit in place. Normal editor flow.
+$EDITOR src/a0_plugin_testkit/assertions.py
+$EDITOR tests/test_smoke.py          # add a self-test
+$EDITOR skill/SKILL.md               # update reference-flow + capabilities
+$EDITOR README.md                    # update "What's in the box"
+
+# ── 3. Validate the testkit in isolation (the .agent-zero dev submodule
+#     pinned in the testkit repo is what self-tests run against).
+pytest                               # must stay green
+
+# ── 4. Validate the consumer repo still passes against your WIP testkit.
+#     (Consumer's pyproject.toml resolves into tests/_testkit/src/, so
+#     your unpushed changes are already live locally.)
+cd ../..
+make docker-test                     # or the consumer's equivalent
+
+# ── 5. Commit + push the testkit branch.
+cd tests/_testkit
+git commit -am "feat(assertions): new helper for <case>"
+git push origin feature/new-helper-name
+#   (If you don't have write access to agent-zero-operator/agent-zero-
+#    plugin-development-testkit, `gh repo fork` first and push to your
+#    fork's remote instead.)
+
+# ── 6. Open the PR against the testkit repo.
+gh pr create \
+  --repo agent-zero-operator/agent-zero-plugin-development-testkit \
+  --title "feat(assertions): new helper for <case>" \
+  --body "..."                       # include the red-first evidence
+```
+
+### While the PR is in review
+
+Your consumer repo is pinned to an **unpushed** submodule commit on a non-origin branch. That's fine locally — `pytest` and `make docker-test` both work against your WIP testkit because they read the files on disk. CI will be unhappy because it only sees the pinned main-branch commit; plan to land the bump below at the same time as any consumer work that depends on the new helper.
+
+### After the PR merges
+
+```bash
+# ── 7. Point the consumer's submodule at main's new tip.
+cd tests/_testkit
+git fetch origin
+git checkout origin/main             # detached again, at new tip
+cd ../..
+
+# ── 8. Verify the full suite still passes against the merged code.
+make docker-test
+
+# ── 9. Commit the pointer bump in the CONSUMER repo.
+git add tests/_testkit
+git commit -m "chore(testkit): bump submodule to <short-sha> (<what-landed>)"
+```
+
+The pointer bump and any consumer-side code that depends on the new helper travel in the same branch/PR on the consumer side. That way nothing lands in a state where the consumer imports a helper that doesn't exist yet at the pinned testkit commit.
+
+### Gotchas, numbered so you don't forget
+
+1. **Detached HEAD inside the submodule.** The submodule clones at a pinned commit with no branch checked out. `git checkout -b <name>` before editing — otherwise `git commit` creates a dangling commit you'll lose on the next `git submodule update`.
+2. **Don't forget to push the submodule branch.** `git status` in the consumer shows the submodule pointer changed, but the testkit branch itself lives in your local `.git/modules/tests/_testkit/` until you push.
+3. **Keep the skill + README in sync with the code.** The biggest single value of the testkit is that authors *discover* what's available without reading the source. A new helper without a Capabilities entry and a reference-flow row is a helper that only its author knows about.
+4. **Consumer repos should never fork the package name.** If you need a radically different shape, contribute a submodule under `a0_plugin_testkit.<new_subpackage>` (like `real.*`) rather than repackaging.
+5. **Preserve the "red-first" evidence.** The PR description should include the exact failing output the new assertion produces against the pre-fix state. Every current assertion has this in its original commit message — match the standard.
+
+### What belongs in the testkit repo vs in this skill
+
+- Testkit repo `tests/test_smoke.py` — behavioural self-tests of the helpers (fast, deterministic, <1s).
+- This skill — narrative + usage patterns + contribution workflow. If you add a capability, update BOTH.
 
 ---
 
