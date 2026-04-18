@@ -1,0 +1,36 @@
+[project]
+name = "a0-plugin-testkit"
+version = "0.1.0"
+description = "Shared pytest scaffolding for Agent Zero plugin repos — canonical extension-point discovery, assertions, A0 fakes, static validator, dependency audit, A0-API audit, scripted FastA2A fixture."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "agent-zero-operator" }]
+keywords = ["agent-zero", "plugin", "testing", "pytest", "a2a"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Pytest",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
+
+[project.optional-dependencies]
+# Pulled in only if the consumer imports a0_plugin_testkit.real.fasta2a.
+fasta2a = ["fasta2a==0.5.0", "httpx>=0.27", "uvicorn>=0.30"]
+# Reserved for a future playwright.A0Page helper.
+playwright = ["playwright>=1.40"]
+
+[project.urls]
+Repository = "https://github.com/agent-zero-operator/agent-zero-plugin-development-testkit"
+"First adopter" = "https://github.com/agent-zero-operator/agent-zero-plugin-livekit"
+
+# Distribution: consumed by plugin repos as a git submodule. No PyPI publish.
+# Versioning is commit-pin on the submodule, matching how the shared skills
+# library is distributed across the agent-zero-operator organisation.
