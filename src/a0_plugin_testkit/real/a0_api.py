@@ -123,6 +123,21 @@ def _module_public_names(module_file: Path) -> frozenset[str]:
     return frozenset(names)
 
 
+@lru_cache(maxsize=64)
+def _module_class_names(module_file: Path) -> frozenset[str]:
+    """Just the ClassDef names in a module — used to distinguish
+    attribute access on an imported class vs. on an imported module.
+    """
+    try:
+        tree = ast.parse(module_file.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return frozenset()
+    return frozenset(
+        node.name for node in tree.body
+        if isinstance(node, ast.ClassDef) and not node.name.startswith("_")
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Resolve local names in a plugin file → A0 module paths
 # --------------------------------------------------------------------------- #
@@ -213,13 +228,21 @@ def audit_a0_api_usage(
             # the last segment and try again.
             module_file = _resolve_a0_module(a0_root, resolved)
             module_path = resolved
+            popped_segment: str | None = None
             if module_file is None and "." in resolved:
-                parent = resolved.rsplit(".", 1)[0]
+                parent, popped_segment = resolved.rsplit(".", 1)
                 module_file = _resolve_a0_module(a0_root, parent)
                 module_path = parent
             if module_file is None:
                 # Couldn't resolve module at all — skip (namespace package or
                 # dynamic path). Don't raise false positives.
+                continue
+
+            # If the popped segment is a CLASS defined in the parent module,
+            # the access is a class-attribute/method lookup. We can't check
+            # method names without executing the code — skip. Catching a
+            # fabricated method on an imported class is future work.
+            if popped_segment and popped_segment in _module_class_names(module_file):
                 continue
 
             public = _module_public_names(module_file)
