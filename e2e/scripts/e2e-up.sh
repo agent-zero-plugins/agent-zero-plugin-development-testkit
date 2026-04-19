@@ -45,6 +45,21 @@ CONSUMER_ROOT="${CONSUMER_ROOT:?CONSUMER_ROOT (plugin repo root) is required}"
 E2E_DIR="$CONSUMER_ROOT/tests/e2e/.e2e"
 INSTANCE_ENV="$E2E_DIR/instance.env"
 
+# ── Node module resolution shim ───────────────────────────────────────────
+# Testkit TS files import from `@playwright/test` at runtime (expect, etc.);
+# that package is installed under the consumer's tests/e2e/node_modules/.
+# Node's resolution from tests/_testkit/e2e/*.ts walks UP to the fs root,
+# never reaches tests/e2e/node_modules/ (it's a sibling, not an ancestor).
+# A symlink at tests/node_modules → e2e/node_modules bridges them:
+#   tests/_testkit/e2e/*.ts  →  ../../node_modules/@playwright/test  (resolves via symlink)
+# The symlink lives outside the testkit submodule (so it doesn't dirty it)
+# and is gitignored at plugin-root level.
+NM_LINK="$CONSUMER_ROOT/tests/node_modules"
+NM_TARGET_REL="e2e/node_modules"
+if [[ ! -e "$NM_LINK" || "$(readlink "$NM_LINK" 2>/dev/null)" != "$NM_TARGET_REL" ]]; then
+  ln -snf "$NM_TARGET_REL" "$NM_LINK"
+fi
+
 # ── Defaults ──────────────────────────────────────────────────────────────
 A0_HTTP_PORT="${A0_HTTP_PORT:-50011}"
 A0_SSH_PORT="${A0_SSH_PORT:-50012}"
