@@ -1,0 +1,61 @@
+# Includeable Makefile fragment for L3 Playwright e2e against a fresh A0.
+#
+# Consumer plugin repo:
+#
+#   # Plugin declares its knobs BEFORE the include:
+#   E2E_EXTRA_PORTS        := 50013:50013
+#   E2E_COMPOSE_OVERRIDES  := docker/e2e.compose.override.yml
+#   E2E_PLUGIN_SETTINGS_JSON := tests/e2e/plugin-settings.json
+#
+#   # Include at bottom of the Makefile so the vars above are seen:
+#   -include tests/_testkit/e2e/Makefile.e2e
+#
+# All Makefile vars listed above are passed through as ENV to the
+# testkit's e2e-up.sh / e2e-down.sh (see their headers for semantics).
+
+# Resolve the directory this Makefile.e2e file lives in. Works inside
+# the plugin repo because `.skills`-style submodules land under a
+# fixed path and include-by-path lets make expand $(dir) here.
+_TESTKIT_E2E_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+
+# ── Plugin-facing defaults (consumers override) ───────────────────────────
+E2E_CONSUMER_ROOT     ?= $(CURDIR)
+E2E_EXTRA_PORTS       ?=
+E2E_COMPOSE_OVERRIDES ?=
+E2E_PLUGIN_SETTINGS_JSON ?=
+E2E_INSTANCE_ENV_EXTRA ?=
+E2E_PLAYWRIGHT_DIR    ?= tests/e2e
+
+# The runtime env the testkit scripts consume. Kept as one variable so
+# every target below composes it once.
+_E2E_ENV := \
+	CONSUMER_ROOT="$(E2E_CONSUMER_ROOT)" \
+	E2E_EXTRA_PORTS="$(E2E_EXTRA_PORTS)" \
+	E2E_COMPOSE_OVERRIDES="$(E2E_COMPOSE_OVERRIDES)" \
+	E2E_PLUGIN_SETTINGS_JSON="$(E2E_PLUGIN_SETTINGS_JSON)" \
+	E2E_INSTANCE_ENV_EXTRA="$(E2E_INSTANCE_ENV_EXTRA)"
+
+.PHONY: e2e-up e2e-down e2e-fresh e2e-test e2e-servers
+
+## e2e-up: Start fresh A0 for e2e (fail-fast if ports busy)
+e2e-up:
+	$(_E2E_ENV) bash "$(_TESTKIT_E2E_DIR)scripts/e2e-up.sh"
+
+## e2e-down: Stop A0 + wipe $(E2E_PLAYWRIGHT_DIR)/.e2e
+e2e-down:
+	$(_E2E_ENV) bash "$(_TESTKIT_E2E_DIR)scripts/e2e-down.sh"
+
+## e2e-fresh: down + up — clean slate
+e2e-fresh:
+	$(MAKE) e2e-down
+	$(MAKE) e2e-up
+
+## e2e-test: e2e-fresh + `npm test` in $(E2E_PLAYWRIGHT_DIR)
+e2e-test: e2e-fresh
+	cd "$(E2E_PLAYWRIGHT_DIR)" && npm test
+
+## e2e-servers: e2e-up + print URL + creds for manual / agent exploration
+e2e-servers: e2e-up
+	@printf '\n[e2e] A0 running. Open:  http://localhost:%s\n' "$${A0_HTTP_PORT:-50011}"
+	@printf '[e2e] Credentials in:  %s/.e2e/instance.env\n' "$(E2E_PLAYWRIGHT_DIR)"
+	@printf '[e2e] Stop:            make e2e-down\n'
