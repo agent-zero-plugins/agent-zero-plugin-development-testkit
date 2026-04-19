@@ -1,4 +1,4 @@
-import { devices, PlaywrightTestConfig } from "@playwright/test";
+import type { PlaywrightTestConfig } from "@playwright/test";
 import * as path from "node:path";
 
 import { loadInstanceEnv } from "./global-setup";
@@ -8,21 +8,33 @@ import { loadInstanceEnv } from "./global-setup";
  * repos. Consumer plugin's ``playwright.config.ts`` spreads the result
  * of ``baseConfig(__dirname)`` and adds ``testDir`` + ``projects`` on top.
  *
- * ``__dirname`` here refers to the consumer's e2e directory (the
- * place where ``playwright.config.ts`` itself lives) — that's what
- * ``globalSetup`` needs as an anchor to find ``.e2e/instance.env``.
- *
- * Loads the per-run ``instance.env`` (written by the testkit's
- * e2e-up.sh) at config-module load time, so the config-level
- * ``process.env.A0_*`` reads below see the hermetic values. The
- * ``globalSetup`` hook re-runs the loader for workers spawned after
- * config load.
+ * Why this file uses ``import type`` only (no runtime
+ * ``@playwright/test`` import): the testkit lives in a submodule at
+ * ``tests/_testkit/`` — Node's module resolution from here walks up to
+ * the filesystem root and never reaches ``tests/e2e/node_modules``
+ * where the consumer's ``@playwright/test`` actually lives. Types
+ * flow across submodule boundaries; runtime imports don't. The
+ * ``devices`` map the consumer wants applied to a browser project is
+ * passed in as an argument — the consumer imports it themselves from
+ * its own ``node_modules``.
  */
-export function baseConfig(consumerE2EDir: string): PlaywrightTestConfig {
+export type BaseConfigOptions = {
+  /**
+   * A ``devices`` entry (e.g. ``devices["Desktop Chrome"]``) to apply
+   * to the default ``chromium`` project. Pass your own Playwright
+   * ``devices`` import result.
+   */
+  desktopChromeDevice?: Record<string, unknown>;
+};
+
+export function baseConfig(
+  consumerE2EDir: string,
+  opts: BaseConfigOptions = {},
+): PlaywrightTestConfig {
   // Run the loader against the CONSUMER's e2e dir. If we used our own
   // __dirname (under tests/_testkit/e2e), we'd miss the consumer's
   // .e2e/instance.env.
-  loadInstanceEnvFor(consumerE2EDir);
+  loadInstanceEnv(path.resolve(consumerE2EDir, ".e2e", "instance.env"));
 
   const BASE_URL = process.env.A0_BASE_URL ?? "http://localhost:50011";
 
@@ -46,21 +58,8 @@ export function baseConfig(consumerE2EDir: string): PlaywrightTestConfig {
     projects: [
       {
         name: "chromium",
-        use: { ...devices["Desktop Chrome"] },
+        use: { ...(opts.desktopChromeDevice ?? {}) },
       },
     ],
   };
-}
-
-/**
- * Load the consumer's own ``.e2e/instance.env`` if present.
- *
- * The loader in ``global-setup.ts`` takes no args (it uses its own
- * ``__dirname``, which would be the testkit's — wrong anchor). This
- * wrapper reuses the same parsing logic but anchors on the consumer's
- * e2e dir.
- */
-function loadInstanceEnvFor(consumerE2EDir: string): void {
-  const envFile = path.resolve(consumerE2EDir, ".e2e", "instance.env");
-  loadInstanceEnv(envFile);
 }

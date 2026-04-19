@@ -1,4 +1,4 @@
-import { test as base, expect, Page } from "@playwright/test";
+import type { Page, TestType } from "@playwright/test";
 
 import { ChatPage } from "../pages/ChatPage";
 import { LoginPage } from "../pages/LoginPage";
@@ -7,25 +7,27 @@ import { PluginsPage } from "../pages/PluginsPage";
 /**
  * Base e2e fixtures shared across A0 plugin repos.
  *
- * ``createA0Fixtures()`` returns a ``test`` object that can be extended
- * with plugin-specific fixtures (e.g. ``installedMyPlugin``). See the
- * testkit's ``skill/SKILL.md`` "L3 browser" section for the full recipe.
+ * Why ``TestType`` is imported as a type + the consumer's ``test`` is
+ * passed in as an argument: the testkit lives in a submodule whose
+ * parent directories don't contain ``node_modules/@playwright/test``,
+ * so any runtime import from here fails. The consumer's
+ * ``fixtures.ts`` does the runtime ``import { test }`` and passes it
+ * to ``createA0Fixtures(test)``.
  *
- * Fixtures provided:
+ * Fixtures provided by ``createA0Fixtures(test)``:
  *   - ``credentials``   — resolved from env vars with admin/admin defaults
  *   - ``loggedInPage``  — a ``Page`` already past the login screen
  *   - ``pluginsPage``   — a ``PluginsPage`` with the panel open
- *   - ``chatPage``      — a ``ChatPage`` (does NOT start a new chat;
- *                         specs call ``chatPage.startNewChat()`` so
- *                         the flow reads top-to-bottom)
+ *   - ``chatPage``      — a ``ChatPage`` (does NOT start a new chat)
  *
- * Plugin-specific composition example:
+ * Usage (consumer plugin's ``tests/e2e/fixtures.ts``):
  *
+ *   import { test as base } from "@playwright/test";
  *   import { createA0Fixtures } from "../_testkit/e2e/fixtures";
  *   import { MyPluginConfigPage } from "./pages/MyPluginConfigPage";
  *
- *   export const test = createA0Fixtures().extend<{
- *     installedMyPlugin: PluginsPage;
+ *   export const test = createA0Fixtures(base).extend<{
+ *     installedMyPlugin: void;
  *     configPage: MyPluginConfigPage;
  *   }>({
  *     installedMyPlugin: async ({ pluginsPage }, use) => {
@@ -33,7 +35,7 @@ import { PluginsPage } from "../pages/PluginsPage";
  *         await pluginsPage.installFromZip(process.env.MY_PLUGIN_ZIP!, "My Plugin");
  *       }
  *       await pluginsPage.close();
- *       await use(pluginsPage);
+ *       await use();
  *     },
  *     configPage: async ({ loggedInPage }, use) => {
  *       await use(new MyPluginConfigPage(loggedInPage));
@@ -51,7 +53,12 @@ export type A0BaseFixtures = {
   chatPage: ChatPage;
 };
 
-export function createA0Fixtures() {
+/**
+ * Given the consumer's Playwright ``test`` export, return a `test`
+ * extended with A0 base fixtures. Consumer typically immediately
+ * calls ``.extend(...)`` again to layer plugin-specific fixtures.
+ */
+export function createA0Fixtures<T extends TestType<any, any>>(base: T) {
   return base.extend<A0BaseFixtures>({
     credentials: async ({}, use) => {
       await use({
@@ -82,4 +89,3 @@ export function createA0Fixtures() {
 // Re-export the Page Objects so plugins can type-hint / extend them
 // without a second import path.
 export { ChatPage, LoginPage, PluginsPage };
-export { expect };
