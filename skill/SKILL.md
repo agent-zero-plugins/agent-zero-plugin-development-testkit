@@ -101,8 +101,55 @@ No PyPI. Versioning is commit-pin on the submodule, same distribution pattern as
 | **L0 unit** | `tests/unit/` | one function / class, no subprocess, no network | <1s | `test_hooks.py`, `test_keys_derivation.py` |
 | **L1 component** | `tests/component/` | one subsystem end-to-end with fixtures / fakes | 1–5s | `test_extension_surface.py`, `test_plugin_validator.py`, `test_a0_client.py` (via `scripted_a2a_server`) |
 | **L2 integration** | `tests/integration/` | real services (e.g. `livekit-server`) + synthetic participants | 10–60s | `test_synthetic_user.py` |
+| **L3 browser (e2e)** | `tests/e2e/` | Playwright + TypeScript driving a live A0 UI | 3–30s | `specs/01-setup.spec.ts` (login + uninstall), `specs/02-install.spec.ts` (install from zip) |
 
-Keep L0 fast — they run on every save. Use `pytestmark = pytest.mark.component` / `integration` at the top of files in higher layers so selective runs work (`pytest -m unit`).
+Keep L0 fast — they run on every save. Use `pytestmark = pytest.mark.component` / `integration` at the top of files in higher layers so selective runs work (`pytest -m unit`). L3 is a separate Node toolchain — see below.
+
+### L3 — Playwright e2e against a live A0
+
+L0/L1/L2 cover plugin code. **L3 covers the UX** — the one slice the
+Python pyramid can't reach because A0 renders the Plugins panel, the
+install dialog, and per-plugin Config modals in the browser. Use L3
+sparingly: it's the slowest layer and the only one that needs a running
+A0 to pass. Anything expressible at L0–L2 should stay there.
+
+**Stack** (bootstrapped first in `agent-zero-plugin-livekit`):
+
+- **`@playwright/test`** (TypeScript). Native test runner — trace viewer,
+  UI mode, auto-wait semantics, first-class Page Object ergonomics.
+- **Not** `pytest-playwright`. Keeping the browser layer in TS avoids
+  coupling the existing `pytest` pyramid to a Node install, and keeps
+  Playwright's best tooling (codegen, `--ui`, trace) on its native path.
+
+**Pre-requisite: the Playwright MCP tool is assumed available to the
+agent** at authoring time. We use `@playwright/mcp` (configured in the
+consumer repo's `.mcp.json`) so the agent can interactively drive a
+browser while designing Page Objects — take accessibility snapshots,
+discover selectors, verify flows. Consumers should wire it exactly like
+any other project-scoped MCP server — see `manage-mcp/SKILL.md` for the
+`make link-mcp` flow and auto-approval. The MCP is **not** a runtime
+dependency of the tests themselves (those use plain `@playwright/test`);
+it's a dev-time authoring affordance.
+
+**Conventions** (live in `tests/e2e/` of the consumer repo):
+
+| Thing | Convention |
+|---|---|
+| Layout | `pages/<Name>Page.ts` Page Objects · `specs/NN-<topic>.spec.ts` tests · `fixtures.ts` at root |
+| Page Object | One class per A0 page. Expose **verbs** (`login(user, pass)`, `installFromZip(path, name)`), not locators. |
+| Selectors | `getByRole("button", { name: "…", exact: true })` — survives re-styling A0. Avoid CSS/XPath. |
+| Fixtures | `credentials` → `loggedInPage` → pre-opened page-object fixtures, composed in `fixtures.ts`. |
+| Parallelism | `workers: 1` + `test.describe.configure({ mode: 'serial' })` whenever a spec mutates A0 runtime state (plugin install/uninstall, settings writes). Parallel = races. |
+| Assertions | Assert on **end state** — card in Custom tab, heading visible — not on toasts (toasts are racy). |
+| Config | `A0_BASE_URL`, `A0_USERNAME`, `A0_PASSWORD`, and plugin-specific `<NAME>_PLUGIN_ZIP` via env, with sensible dev defaults. |
+| Dependencies | Playwright pinned in `tests/e2e/package.json`. Gitignore `node_modules/`, `test-results/`, `playwright-report/`, `blob-report/`, and `.playwright-mcp/`. |
+| Run | `cd tests/e2e && npm install && npx playwright install chromium && npm test` |
+
+A minimal consumer `tests/e2e/` directory needs: `package.json` (with
+`@playwright/test`), `playwright.config.ts` (sequential workers + base
+URL), `tsconfig.json`, `fixtures.ts`, at least one `pages/<Name>Page.ts`,
+and one spec under `specs/`. See `tests/e2e/README.md` in the first
+adopter (`agent-zero-plugin-livekit`) for the canonical layout.
 
 ---
 
@@ -235,7 +282,42 @@ audit = audit_a0_api_usage(plugin_dir)
 assert_a0_api_usage_ok(audit)
 ```
 
-AST-walks the plugin, resolves local names bound to A0-internal modules (`from helpers import settings`, `import helpers.settings as s`, aliases, …), and for each `<local>.<attr>` access verifies `<attr>` exists as a public top-level in the real A0 module source. Catches the "I called `helpers.settings.set_setting` but A0's real API is `set_settings_delta`" class of bug — the one that passes mypy but blows up at first use.
+AST-walks the plugin, resolves local names bound to A0-internal modules (`from helpers import settings`, `import helpers.settings as s`, aliases, …), and for each `<local>.<attr>` access verifies `<attr>` exists as a public top-level in the real A0 module source. Correctly handles class-attribute access like `UiServerRuntime.build_asgi_app` (class name at module top-level + method lookup is not a fabricated-module-attr). Catches the "I called `helpers.settings.set_setting` but A0's real API is `set_settings_delta`" class of bug — the one that passes mypy but blows up at first use.
+
+### `a0_plugin_testkit.real.public_urls` — container-URL leakage
+
+```python
+from a0_plugin_testkit.real.public_urls import (
+    assert_no_naked_container_urls_in_public_response,
+)
+
+assert_no_naked_container_urls_in_public_response(plugin_dir)
+```
+
+AST-walks `<plugin_dir>/api/*.py`, finds every `ApiHandler.process` method and `build_*_response` helper, and flags container-local URLs leaking to the browser via two patterns:
+
+1. **Passthrough** — a parameter whose name contains "url" is returned as a non-exempt dict key (`return {"url": livekit_url}`).
+2. **Hardcoded literal** — a dict value string-contains `127.0.0.1`, `localhost`, `0.0.0.0`, or `host.docker.internal`.
+
+Exempt keys (default: `internal_url`, `host`, `livekit_url`, `upstream_url`, `probe_url`, `hostname`, `livekit_rtc_tcp_port`) carry the in-container URL intentionally for diagnostics; override via the `exempt_keys=` kwarg. Catches the "containerised A0 hands the browser a 127.0.0.1 URL, browser fails with `Failed to fetch`" class.
+
+### `a0_plugin_testkit.real.ports` — undeclared listening ports
+
+```python
+from a0_plugin_testkit.real.ports import assert_plugin_declares_required_ports
+
+assert_plugin_declares_required_ports(plugin_dir)
+```
+
+AST-walks `<plugin_dir>/helpers/` and `<plugin_dir>/api/` for listening-port flags (`--rtc.tcp_port`, `--port`, `--listen`, `--bind-port`, `--rtc.port_range_start`) in subprocess command-list literals and string args. Cross-references every literal port number found against the plugin's declaration surface — in order:
+
+1. `plugin.yaml` top-level `extra_ports:` list (preferred structured form).
+2. `plugin.yaml` `description:` containing `-p <port>:<port>` docker examples.
+3. `README.md` containing `-p <port>:<port>` examples.
+
+Any port opened but undeclared fails with a message that prints the exact `extra_ports:` stanza to add. Catches "plugin runs an auxiliary service (TURN, local LLM, SFU, vector DB) whose port the user never knew to publish" — the follow-up class to the container-URL bug above.
+
+Limit: literal ports only; dynamic expressions (`f"--rtc.port_range_start={port + 20}"`) are not caught. Document ports explicitly rather than computing them if you want the assertion to cover them.
 
 ---
 
@@ -250,9 +332,12 @@ AST-walks the plugin, resolves local names bound to A0-internal modules (`from h
 | "Will my plugin render a blank card in the Plugin List?" | `assert_plugin_has_thumbnail(plugin_dir)` |
 | "Will my plugin crash at first HTTP hit with `ModuleNotFoundError`?" | `audit_dependencies(plugin_dir)` + `assert_dependencies_declared` |
 | "Did I call an A0 function that doesn't exist?" | `audit_a0_api_usage(plugin_dir)` + `assert_a0_api_usage_ok` |
+| "Will my plugin hand the browser a `127.0.0.1` URL that only A0 can reach?" | `assert_no_naked_container_urls_in_public_response(plugin_dir)` |
+| "Did I open a listening port without declaring it in plugin.yaml / README?" | `assert_plugin_declares_required_ports(plugin_dir)` |
 | "Is the whole plugin structurally valid for the Plugin Hub?" | `static_validate(plugin_dir)` + `assert_validator_clean` |
 | "Unit test my hooks.py without importing A0?" | `install_fake_a0_helpers(monkeypatch)` + `import_plugin_module(...)` |
 | "Component-test my A2A client against a real FastA2A?" | `scripted_a2a_server(scripts={…})` |
+| "Browser-test an install/uninstall/config flow against a live A0?" | L3 — set up `tests/e2e/` with `@playwright/test` (see L3 section above). Pre-req: `@playwright/mcp` wired in consumer's `.mcp.json` for agent-assisted authoring. |
 
 ---
 
