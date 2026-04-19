@@ -145,11 +145,85 @@ it's a dev-time authoring affordance.
 | Dependencies | Playwright pinned in `tests/e2e/package.json`. Gitignore `node_modules/`, `test-results/`, `playwright-report/`, `blob-report/`, and `.playwright-mcp/`. |
 | Run | `cd tests/e2e && npm install && npx playwright install chromium && npm test` |
 
-A minimal consumer `tests/e2e/` directory needs: `package.json` (with
-`@playwright/test`), `playwright.config.ts` (sequential workers + base
-URL), `tsconfig.json`, `fixtures.ts`, at least one `pages/<Name>Page.ts`,
-and one spec under `specs/`. See `tests/e2e/README.md` in the first
-adopter (`agent-zero-plugin-livekit`) for the canonical layout.
+### L3 — what the testkit ships vs what the plugin writes
+
+The testkit's `e2e/` tree now provides the reusable harness; the plugin
+writes only the plugin-specific specifics. Every A0 plugin repo wires
+this in via three small hooks — no copy-paste scaffolding.
+
+**Testkit provides** (in `tests/_testkit/e2e/`):
+
+- `compose-base.yml` — A0 container on 50011/50012 + pip-cache mount +
+  pre-boot `/a0/usr/.env` and `/a0/usr/settings.json` seed
+- `scripts/e2e-up.sh` / `e2e-down.sh` — port probe, random token,
+  healthcheck, writes `.e2e/instance.env`
+- `Makefile.e2e` — includeable file with `e2e-up` / `e2e-down` /
+  `e2e-fresh` / `e2e-test` / `e2e-servers` targets
+- `pages/LoginPage.ts`, `pages/PluginsPage.ts` (install / uninstall /
+  isInstalled), `pages/ChatPage.ts` (sidebar + new chat only — **no**
+  plugin-specific UI)
+- `fixtures/index.ts` — `createA0Fixtures()` factory returning a Playwright
+  `test` with `credentials` / `loggedInPage` / `pluginsPage` / `chatPage`
+- `global-setup.ts` + `playwright-base.config.ts` — pre-wired globalSetup
+  + env loader + serial mode + trace-on-failure
+
+**Plugin writes** (three hook files):
+
+1. **`Makefile`** — declare extras, include the targets:
+
+   ```make
+   E2E_EXTRA_PORTS          := 50013:50013      # plugin-specific ports (media, SIP, etc.)
+   E2E_COMPOSE_OVERRIDES    := docker/e2e.compose.override.yml    # if needed
+   E2E_PLUGIN_SETTINGS_JSON := tests/e2e/plugin-settings.json     # {"plugin_<name>":{...}}
+   E2E_INSTANCE_ENV_EXTRA   := A0_LK_RTC_TCP_PORT=50013           # vars for Playwright specs
+
+   -include tests/_testkit/e2e/Makefile.e2e
+   ```
+
+2. **`tests/e2e/playwright.config.ts`** — spread base:
+
+   ```ts
+   import { defineConfig } from "@playwright/test";
+   import { baseConfig } from "../_testkit/e2e/playwright-base.config";
+
+   export default defineConfig({
+     ...baseConfig(__dirname),
+     testDir: "./specs",
+   });
+   ```
+
+3. **`tests/e2e/fixtures.ts`** — compose plugin-specific fixtures:
+
+   ```ts
+   import { createA0Fixtures } from "../_testkit/e2e/fixtures";
+   import { MyPluginConfigPage } from "./pages/MyPluginConfigPage";
+
+   export const MY_PLUGIN_DISPLAY_NAME = "My Plugin";
+   export const test = createA0Fixtures().extend<{
+     installedMyPlugin: void;
+     configPage: MyPluginConfigPage;
+   }>({
+     installedMyPlugin: async ({ pluginsPage }, use) => {
+       if (!(await pluginsPage.isInstalled(MY_PLUGIN_DISPLAY_NAME))) {
+         await pluginsPage.installFromZip(process.env.MY_PLUGIN_ZIP!, MY_PLUGIN_DISPLAY_NAME);
+       }
+       await pluginsPage.close();
+       await use();
+     },
+     configPage: async ({ loggedInPage }, use) => {
+       await use(new MyPluginConfigPage(loggedInPage));
+     },
+   });
+   export { expect } from "@playwright/test";
+   ```
+
+Plugin-specific Page Objects (e.g. a Config modal, or a Talk-button
+modal) live in the plugin's `tests/e2e/pages/`. Specs and `package.json`
+are plugin-local.
+
+See `tests/_testkit/e2e/README.md` for the full wiring reference,
+including the parameter matrix, zero-config path, and operational notes
+(pip-cache, same-port publishes for ICE, manual-URL override, etc.).
 
 ---
 

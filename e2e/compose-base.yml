@@ -1,0 +1,73 @@
+# Generic A0 docker-compose base for L3 e2e tests.
+#
+# Consumer plugin repos layer their own override file on top with:
+#   - any plugin-specific extra ports to publish
+#   - a settings-seed fragment for `plugin_<name>` keys (if any)
+#
+# The testkit's scripts/e2e-up.sh wires overrides in via:
+#   docker compose -f <this file> -f <override1> -f <override2> ...
+#
+# Ports:
+#   50011 → container 80    A0 HTTP (browser + Playwright)
+#   50012 → container 22    A0 SSH  (debug)
+# Additional plugin-specific ports go in the override (published
+# SAME host:container so any ICE-TCP / media candidates LK-style
+# plugins advertise match what the browser reaches).
+#
+# Creds + base settings are seeded pre-boot in the `command:` override.
+# Consumer overrides can add further seeded keys by extending the
+# settings-JSON heredoc — see tests/_testkit/e2e/README.md.
+
+name: a0-e2e
+
+services:
+  agent-zero:
+    image: "${A0_IMAGE:-agent0ai/agent-zero:latest}"
+    container_name: "${A0_CONTAINER_NAME:-a0-e2e}"
+    pull_policy: missing
+    restart: "no"
+
+    environment:
+      AUTH_LOGIN: "${AUTH_LOGIN:-admin}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-admin}"
+      # The full /a0/usr/settings.json contents, assembled host-side by
+      # scripts/e2e-up.sh (base mcp_server_token + plugin-specific
+      # E2E_PLUGIN_SETTINGS_JSON merged together). The container just
+      # writes this verbatim — no jq/python gymnastics in the image.
+      A0_SEEDED_SETTINGS_JSON: "${A0_SEEDED_SETTINGS_JSON}"
+      # Path the pip-cache bind mount below lands at inside the
+      # container. Tell pip to use it; warm cache = fast reinstalls.
+      PIP_CACHE_DIR: /a0/.pip-cache
+      BRANCH: "${A0_BRANCH:-main}"
+
+    ports:
+      - "${A0_HTTP_PORT:-50011}:80"
+      - "${A0_SSH_PORT:-50012}:22"
+
+    volumes:
+      # Persistent pip-cache so fresh-container runs don't re-download
+      # heavy plugin deps every time. Host path is plugin-local and
+      # gitignored (see per-plugin .gitignore conventions).
+      - "${PIP_CACHE_HOST_DIR:-../.e2e-cache/pip}:/a0/.pip-cache"
+
+    # Pre-boot seeding: write .env + settings.json (assembled host-side),
+    # then exec the image's normal entrypoint. A0's normalize_settings()
+    # tolerates partial JSON, so the seed only needs the keys we want
+    # to override.
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        mkdir -p /a0/usr
+        printf 'AUTH_LOGIN=%s\nAUTH_PASSWORD=%s\n' "$$AUTH_LOGIN" "$$AUTH_PASSWORD" > /a0/usr/.env
+        printf '%s\n' "$$A0_SEEDED_SETTINGS_JSON" > /a0/usr/settings.json
+        echo "[e2e-init] seeded /a0/usr/.env + settings.json"
+        exec /exe/initialize.sh "$$BRANCH"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/login >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
