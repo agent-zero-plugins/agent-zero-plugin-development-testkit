@@ -395,6 +395,150 @@ Limit: literal ports only; dynamic expressions (`f"--rtc.port_range_start={port 
 
 ---
 
+## A0 plumbing patterns every plugin needs to know
+
+These are properties of Agent Zero itself, not of any one plugin. Document them here so every plugin author hits them once, not thrice.
+
+### A0 routes ALL ApiHandlers at `/api/<path>`
+
+A0's ASGI app (see [`.agent-zero/helpers/api.py:229`](../../../.agent-zero/helpers/api.py)) registers every subclass of `ApiHandler` at `/api/<filename>`, not at the bare `<filename>`. A plugin contributing `api/my_handler.py` is reachable at `POST /api/my_handler`. POSTing to `/my_handler` returns **405 Method Not Allowed** (hits Flask's catch-all). This trips up plugins that hand-build URLs in clients.
+
+Rule: plugin HTTP clients must target `"<base_url>/api/<handler_name>"`. Both the runtime code and the tests that mock it.
+
+### ApiHandler auth variants
+
+`ApiHandler` subclasses declare their auth policy via class methods:
+
+```python
+class MyHandler(ApiHandler):
+    @classmethod
+    def requires_auth(cls)    -> bool: return False  # web session
+    @classmethod
+    def requires_csrf(cls)    -> bool: return False
+    @classmethod
+    def requires_api_key(cls) -> bool: return True   # X-API-KEY header
+```
+
+Critical: an **authenticated browser session does NOT satisfy `requires_api_key=True`**. The browser needs to pass `X-API-KEY: <mcp_server_token>` explicitly. If a plugin endpoint is called from `fetch()` in the browser and returns 401 "API key required," the endpoint likely has `requires_api_key=True` — flip it to false (with appropriate `requires_auth=True` for session-gated endpoints) or inject the header.
+
+### A0 chat-log entry taxonomy
+
+When a plugin reads A0's chat log (via `GET /api/api_log_get` or directly from `AgentContext.log`), it gets a heterogeneous list. The types:
+
+| `type` | What it is | Where the actual text is | Include in dialogue reconstruction? |
+|---|---|---|---|
+| `user` | Human turn | `content` (plain text) | **Yes** — role=user |
+| `response` | A0's clean spoken reply (what the user saw rendered) | `content` (possibly Markdown) | **Yes** — role=assistant |
+| `agent` | A0's internal reasoning JSON blob (`{"thoughts":[…],"tool_name":…,"tool_args":…}`) | `content` is raw JSON, `kvps.thoughts` is string-repr of thoughts | **No** — feeding this to a downstream LLM is structured hallucination bait |
+| `util` | Internal scaffolding (knowledge preload, memory lookup) | `heading` / `kvps.progress` | No |
+| `info` | Tool invocation markers ("[running tool X]") | `content` / `kvps.tool_*` | No |
+| `progress` | Long-running status | `content` | No |
+| `hint` | Tips surfaced to the UI | `content` | No |
+| `error` | Error surfaced to the UI | `content` | No |
+
+The rendered agent text that a keyboard user SEES comes from `type=response` entries AND from `kvps.thoughts` on `type=agent` entries — A0's `drawMessageAgent` JS renders the `thoughts` field for agent-type entries, not their raw `content`. Plugins that log their own pseudo-agent turns (e.g., a voice agent mirroring spoken text into the chat) should write `kvps.thoughts = text` so the UI renders visible content — setting only `content` on a `type=agent` entry produces an empty-body card.
+
+### A0 persists chats to disk + hydrates them into `chats.Alpine.store`
+
+Persistence: `/a0/usr/chats/<ctxid>/chat.json`. Contains `id`, `name`, `type`, `created_at`, `last_message`, `log.logs[]`.
+
+UI hydration: `state_snapshot` (see [`.agent-zero/helpers/state_snapshot.py`](../../../.agent-zero/helpers/state_snapshot.py)) walks `AgentContext.all()`, calls `ctx.output()` (see [`.agent-zero/agent.py:180-202`](../../../.agent-zero/agent.py#L180-L202)) per context, and packs it as `snapshot.contexts`. The browser's `chatsStore.applyContexts(contextsList)` fills `Alpine.store("chats").contexts`. Each entry then exposes:
+
+| Field | Source | Useful for |
+|---|---|---|
+| `id` | context id | identity |
+| `name` | context name | sidebar label |
+| `log_length` | `len(ctx.log.logs)` | **"does this chat have history?"** (1 = A0 auto-seeds every new chat with a bootstrap greeting; N>1 = actual conversation) |
+| `log_version` | `len(ctx.log.updates)` | cache invalidation |
+| `created_at`, `last_message` | datetimes | sorting |
+| `type` | `user` / `task` / `background` | filter sidebar contexts (BACKGROUND hidden) |
+| `running` | `ctx.is_running()` | live status |
+
+Reading `Alpine.store("chats").contexts.find(c => c.id === id).log_length` is the idiomatic browser-side "is this chat truly empty?" check.
+
+### Browser's `getContext()` / `setContext()` / `newContext()` / `deselectChat()`
+
+A0 binds a handful of global functions to `globalThis` from [`.agent-zero/webui/index.js:537-602`](../../../.agent-zero/webui/index.js#L537-L602):
+
+| Function | Effect |
+|---|---|
+| `getContext()` | Returns current selected context id (string) or null |
+| `setContext(id)` | Switches to context; fires websocket `state_request`; clears chat-history DOM; focuses input |
+| `newContext()` | Generates a fresh 8-char id, calls `setContext(id)` (does NOT create a backend context — `chats.newChat()` does that) |
+| `deselectChat()` | `setContext(null)` + clears `sessionStorage` selections |
+
+`chats.newChat()` on the Alpine store POSTs `/chat_create` and then `selectChat(response.ctxid)` → `setContext(id)`. After `newChat()`, `getContext()` returns the NEW chat's id (not null). A plugin that wants "treat newly-created empty chats differently" must inspect `log_length` on the entry, not rely on `getContext()` being null.
+
+### Reconfiguring a plugin at runtime (`save_config`)
+
+A0 exposes a generic plugin-config writer at `POST /api/plugins`:
+
+```json
+{
+  "action": "save_config",
+  "plugin_name": "<your plugin's name>",
+  "project_name": "",
+  "agent_profile": "",
+  "settings": { ... full settings object ... }
+}
+```
+
+The plugin re-reads settings on every API call (no restart needed for config changes alone). Response is `{"ok": true}` on success. This is how the `00-configure-*.spec.ts` pattern drives BYO/cloud credentials into a running A0.
+
+Gotcha: the request body key is `"settings"`, not `"config"`. (Every first attempt gets this wrong once.)
+
+### When does a plugin reinstall require an A0 process restart?
+
+Plugin extensions that run at **A0 startup only** don't re-fire on a mere `pip install`-style reinstall of the plugin. Specifically:
+
+- `extensions/python/_functions/__main__/init_a0/end/*.py` — runs once when `init_a0` fires during A0 boot. Anything that monkey-patches A0's ASGI app, registers signal handlers, or mounts starlette routes has to be re-applied after a reinstall, which typically means restarting A0.
+
+Symptom if missed: browser sees "upstream unavailable" for endpoints that were working pre-reinstall; error message includes a hint like "check A0 logs for 'signal proxy Mount installed'."
+
+Mitigation pattern: spec `02b-restart.spec.ts` is common to testkit-consuming repos — gated on hermetic mode (`tests/e2e/.e2e/instance.env` present) so it only `docker restart`s containers the harness owns. In manual mode against a developer's long-lived A0, the spec skips and the developer restarts themselves.
+
+### Install + reconfigure as first-class e2e specs
+
+The install flow (login → uninstall if present → install from zip) and the reconfigure flow (login → POST /api/plugins with settings) are both so repeatable that they BELONG as specs. Running them costs seconds via `playwright test specs/0X.spec.ts`; running them by hand costs minutes and can't be replayed on every zip rebuild.
+
+Canonical numbering:
+
+- `00-configure-<target>.spec.ts` — write settings (env-vars for secrets; skip-if-missing).
+- `01-setup.spec.ts` — login + uninstall-if-installed.
+- `02-install.spec.ts` — install from dist zip, assert card visible.
+- `02b-restart.spec.ts` — hermetic-only: `docker restart` so init_a0 re-fires.
+- `03-*.spec.ts` onward — plugin-specific feature specs.
+
+Three shells from the consumer recipe:
+
+```bash
+# Install cycle
+cd tests/e2e
+A0_BASE_URL=... A0_USERNAME=... A0_PASSWORD=... \
+  ./node_modules/.bin/playwright test \
+    specs/01-setup.spec.ts specs/02-install.spec.ts --reporter=line
+
+# Reconfigure (plugin-specific env vars for secrets; skips cleanly when absent)
+A0_BASE_URL=... A0_USERNAME=... A0_PASSWORD=... \
+  <MY_PLUGIN_CREDS>=... \
+  ./node_modules/.bin/playwright test \
+    specs/00-configure-<target>.spec.ts --reporter=line
+
+# Hermetic restart (skipped in manual mode)
+./node_modules/.bin/playwright test specs/02b-restart.spec.ts --reporter=line
+```
+
+### Debug recipe: "why is my plugin seeing wrong data from A0 logs?"
+
+When a plugin reads `AgentContext.log` or calls `/api/api_log_get`:
+
+1. **Dump a real log off disk first.** `cat /a0/usr/chats/<ctxid>/chat.json | jq '.log.logs[0:6] | map({type, heading, content, kvps})'` shows the actual entry shapes. Easier than arguing about them.
+2. **Check which fields you're filtering on.** The common bug: filter `type in ("user", "agent")` + map `content` as assistant text → you've ingested A0's raw reasoning JSON blob as dialogue.
+3. **Check which fields have the visible text.** `type=agent` entries' real text lives in `kvps.thoughts` (what A0's UI renders), not `content` (raw JSON). `type=response` entries have plain `content`.
+4. **Check whether A0's bootstrap greeting is being treated as "history."** `log_length=1` is the default for a just-created empty chat; that one entry is a bootstrap `"Hello! 👋"` `type=response`. Don't let it flip a "this chat has history" flag if you only want real dialogue.
+
+---
+
 ## Reference flow: what to use when
 
 | Need | Reach for |
