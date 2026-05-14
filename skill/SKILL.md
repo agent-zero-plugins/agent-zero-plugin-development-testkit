@@ -2,7 +2,7 @@
 name: a0-plugin-testkit
 description: "Shared test scaffolding for Agent Zero plugin repos. Scrapes A0's source at runtime for canonical extension-point IDs, JS hooks, plugin lifecycle hooks, and module attribute names — exposes them as fast pytest assertions. Ships A0 fakes, a live FastA2A fixture, a static validator, a dependency audit, and an A0-API audit. Meant to be actively evolved by consumer repos — load whenever building, extending, debugging, OR contributing back new reusable testing assets."
 version: "0.3.0"
-author: "agent-zero-operator"
+author: "Agent Zero Plugins"
 tags: ["plugins", "testing", "testkit", "pytest", "extension-points", "a2a", "hooks"]
 trigger_patterns:
   - "plugin testkit"
@@ -48,23 +48,44 @@ The testkit eliminates that class of bug by **scraping A0's own source for canon
 
 ## Where it lives
 
-**Today** (phase 1): vendored inside `agent-zero-plugin-livekit` at [`tests/_testkit/src/a0_plugin_testkit/`](../../_testkit/src/a0_plugin_testkit/), consumed via `pyproject.toml`'s `pythonpath = ["tests/_testkit/src"]`.
+Standalone repo at
+[`agent-zero-plugins/agent-zero-plugin-development-testkit`](https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit).
+Distributed to plugin source repos via the org's shared skills library —
+[`agent-zero-plugins-skills`](https://github.com/agent-zero-plugins/agent-zero-plugins-skills)
+vendors the testkit at `vendor/a0-plugin-testkit/` and exposes it to
+consumer plugin repos as a relative symlink at `tests/_testkit/` via
+the skills repo's `make link-testkit` target (included in `make link-all`).
 
-**Tomorrow** (once a second plugin adopts it): extracted to a standalone repo `agent-zero-plugin-testkit`, consumed as a git submodule at `.testkit/`. Imports stay identical — `from a0_plugin_testkit.X import Y` — so extraction is a filesystem move, not an import rewrite.
-
-No PyPI. Versioning is commit-pin on the submodule, same distribution pattern as `.skills`.
+No PyPI. Versioning is commit-pin on the skills submodule — bump the
+`.skills` ref and you get the testkit version that was current with that
+skills snapshot. Single bump, single source of truth.
 
 ---
 
 ## Installing the testkit into a fresh plugin repo
 
-1. **Vendor or submodule it.** Either copy `tests/_testkit/` from this repo, or (once extracted) `git submodule add https://github.com/agent-zero-operator/agent-zero-plugin-testkit .testkit`.
+The standard path: bootstrap the consumer plugin repo against
+`agent-zero-plugins-skills` per the
+[`bootstrap-plugins-repo`](https://github.com/agent-zero-plugins/agent-zero-plugins-skills/blob/main/shared-assets/skills/org/bootstrap-plugins-repo/SKILL.md)
+skill, then `make link-all PARENT_ROOT=$(pwd)` — the testkit lands at
+`tests/_testkit/` automatically as a relative symlink into
+`.skills/vendor/a0-plugin-testkit/`.
 
-2. **Put it on `pythonpath`.** In the consumer repo's `pyproject.toml`:
+If you're bootstrapping a repo OUTSIDE this org's pattern (no
+`.skills` submodule, plain testkit-only consumer), add the testkit
+directly as its own submodule:
+
+```bash
+git submodule add https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit tests/_testkit
+```
+
+In either case, the rest of the wiring is identical:
+
+1. **Put it on `pythonpath`.** In the consumer repo's `pyproject.toml`:
    ```toml
    [tool.pytest.ini_options]
    testpaths = ["tests"]
-   pythonpath = [".", "tests/_testkit/src"]   # or ".testkit/src" when submoduled
+   pythonpath = [".", "tests/_testkit/src"]
    asyncio_mode = "auto"
    markers = [
      "unit: fast L0 tests, no subprocess, no network",
@@ -73,7 +94,7 @@ No PyPI. Versioning is commit-pin on the submodule, same distribution pattern as
    ]
    ```
 
-3. **Wire the `plugin_dir` fixture.** Every assertion takes `plugin_dir: Path` — declare it once in `tests/conftest.py`:
+2. **Wire the `plugin_dir` fixture.** Every assertion takes `plugin_dir: Path` — declare it once in `tests/conftest.py`:
    ```python
    from pathlib import Path
    import pytest
@@ -84,13 +105,13 @@ No PyPI. Versioning is commit-pin on the submodule, same distribution pattern as
                / "usr" / "plugins" / "<your_plugin_name>")
    ```
 
-4. **Ensure A0 is reachable.** Most assertions need to read from A0's source. The testkit looks for:
+3. **Ensure A0 is reachable.** Most assertions need to read from A0's source. The testkit looks for:
    1. `$A0_ROOT` env var, if set.
-   2. A `.agent-zero/` submodule at the repo root (standard in agent-zero-operator plugin repos).
+   2. A `.agent-zero/` submodule at the repo root (standard in agent-zero-plugins plugin repos).
    3. Walking up from the testkit's own location.
    If none resolve, assertions raise with an actionable message.
 
-5. **Run the suite inside a container.** The lean `docker/dev.Dockerfile` in this repo is a good template — Python 3.11 + the pinned deps in `requirements-dev.txt`. Never `pip install` the testkit's deps on the host.
+4. **Run the suite inside a container.** The lean `docker/dev.Dockerfile` in this repo is a good template — Python 3.11 + the pinned deps in `requirements-dev.txt`. Never `pip install` the testkit's deps on the host.
 
 ---
 
@@ -689,13 +710,13 @@ make docker-test                     # or the consumer's equivalent
 cd tests/_testkit
 git commit -am "feat(assertions): new helper for <case>"
 git push origin feature/new-helper-name
-#   (If you don't have write access to agent-zero-operator/agent-zero-
+#   (If you don't have write access to agent-zero-plugins/agent-zero-
 #    plugin-development-testkit, `gh repo fork` first and push to your
 #    fork's remote instead.)
 
 # ── 6. Open the PR against the testkit repo.
 gh pr create \
-  --repo agent-zero-operator/agent-zero-plugin-development-testkit \
+  --repo agent-zero-plugins/agent-zero-plugin-development-testkit \
   --title "feat(assertions): new helper for <case>" \
   --body "..."                       # include the red-first evidence
 ```
