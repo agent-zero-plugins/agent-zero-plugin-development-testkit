@@ -6,9 +6,16 @@ One image, three uses (SPEC `DEC-018`):
 2. **Developers** use it as a dev container.
 3. **AI agents** run it (docker or podman) to develop + test locally before pushing.
 
-It carries **Playwright** (browsers + system libs, from the official Playwright base)
-plus **rootless podman**, so it boots the Agent Zero container **nested and
-unprivileged** — no `--privileged`, no host `docker.sock`.
+It boots the Agent Zero container **nested and unprivileged** via **rootless podman** —
+no `--privileged`, no host `docker.sock`.
+
+> **Spike finding (base image is load-bearing):** basing on the official Playwright image
+> (Ubuntu jammy) + apt `podman` (3.4.4) **fails** to nest rootlessly —
+> `cannot setup namespace using newuidmap`. Basing on `quay.io/podman/stable`
+> (podman 5.8.2, purpose-built for nesting) **works** (verified locally:
+> `NESTED_IN_DEVKIT_OK`). So the image bases on podman/stable; **Playwright** browsers are a
+> **Phase-1** Fedora addition (the Phase-0 gate is *nesting*, which needs no browser). See
+> SPEC `DEC-039`.
 
 ## Why this exists
 
