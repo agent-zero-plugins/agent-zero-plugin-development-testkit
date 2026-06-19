@@ -15,7 +15,7 @@ on:
       a0_image:
         description: "A0 image to boot nested (DEC-019 parameter)"
         required: false
-        default: "agent0ai/agent-zero:latest"
+        default: "docker.io/agent0ai/agent-zero:latest"
   push:
     branches: ["spike/devcontainer-phase0"]
 
@@ -37,7 +37,7 @@ jobs:
 
       - name: Run Phase-0 acceptance INSIDE the devcontainer (nested, unprivileged)
         env:
-          A0_IMAGE: ${{ github.event.inputs.a0_image || 'agent0ai/agent-zero:latest' }}
+          A0_IMAGE: ${{ github.event.inputs.a0_image || 'docker.io/agent0ai/agent-zero:latest' }}
         run: |
           podman run --rm \
             --device /dev/fuse \

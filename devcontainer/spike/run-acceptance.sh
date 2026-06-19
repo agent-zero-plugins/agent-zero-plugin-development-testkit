@@ -14,7 +14,8 @@
 # Playwright harness (proven on livekit) — it is Phase-2, not this gate.
 set -euo pipefail
 
-A0_IMAGE="${A0_IMAGE:-agent0ai/agent-zero:latest}"   # DEC-019: parameterized
+# Fully-qualified: podman/stable enforces short-name resolution (no TTY to prompt in CI).
+A0_IMAGE="${A0_IMAGE:-docker.io/agent0ai/agent-zero:latest}"   # DEC-019: parameterized
 A0_HTTP_PORT="${A0_HTTP_PORT:-8080}"
 A0_NAME="a0-spike"
 AUTH_LOGIN="${AUTH_LOGIN:-admin}"
