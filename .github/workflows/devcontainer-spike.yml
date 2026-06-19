@@ -1,0 +1,49 @@
+# Phase-0 feasibility spike (SPEC DEC-031 / Appendix E.6).
+#
+# Proves on a GitHub-hosted ubuntu-latest runner that the devkit devcontainer
+# can boot Agent Zero NESTED via ROOTLESS podman — no --privileged, no host
+# docker.sock — and that the harness reaches + authenticates against it.
+#
+# This is the gate for everything else in the plugin-quality-standard SPEC:
+# if this is red, the devcontainer model (DEC-018) needs the self-hosted-runner
+# fallback before Phase 1.
+name: devcontainer-spike
+
+on:
+  workflow_dispatch:
+    inputs:
+      a0_image:
+        description: "A0 image to boot nested (DEC-019 parameter)"
+        required: false
+        default: "agent0ai/agent-zero:latest"
+  push:
+    branches: ["spike/devcontainer-phase0"]
+
+jobs:
+  rootless-nested-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tooling versions (rootless, no privilege)
+        run: |
+          podman --version
+          echo "rootless: $(podman info --format '{{.Host.Security.Rootless}}')"
+          ls -l /dev/fuse || true
+
+      - name: Build the devkit devcontainer image (rootless)
+        run: podman build -t plugin-devkit:spike -f devcontainer/Containerfile devcontainer
+
+      - name: Run Phase-0 acceptance INSIDE the devcontainer (nested, unprivileged)
+        env:
+          A0_IMAGE: ${{ github.event.inputs.a0_image || 'agent0ai/agent-zero:latest' }}
+        run: |
+          podman run --rm \
+            --device /dev/fuse \
+            --security-opt label=disable \
+            -e A0_IMAGE="$A0_IMAGE" \
+            -v "$PWD":/workspace:Z \
+            -w /workspace \
+            plugin-devkit:spike \
+            -lc 'bash devcontainer/spike/run-acceptance.sh'

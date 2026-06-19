@@ -1,0 +1,72 @@
+# Agent Zero plugin devkit — unified execution environment.
+#
+# One image, three uses (SPEC DEC-018):
+#   1. GitHub Actions runs the plugin e2e lifecycle inside it.
+#   2. A developer uses it as a dev container.
+#   3. An AI agent runs it (docker OR podman) to develop + test locally.
+#
+# It carries Playwright (browsers + deps) AND rootless podman, so it can boot
+# the Agent Zero container *nested and unprivileged* — no --privileged, no host
+# docker.sock (SPEC REQ-DEV-003 / REQ-CI-006). Proven mechanism: rootless
+# podman-in-podman via `--device /dev/fuse --security-opt label=disable`.
+#
+# Base: the official Playwright image (Ubuntu jammy) already ships node + the
+# browser binaries + their system libs — the painful half of the image.
+
+FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+
+# --- rootless podman toolchain -------------------------------------------------
+# podman + the rootless plumbing: fuse-overlayfs (rootless storage), uidmap
+# (newuidmap/newgidmap for subuid/subgid), slirp4netns (rootless networking).
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      podman \
+      fuse-overlayfs \
+      uidmap \
+      slirp4netns \
+      crun \
+      curl \
+      jq \
+      openssh-client \
+      ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- rootless configuration ----------------------------------------------------
+# The Playwright image ships an unprivileged user `pwuser` (uid 1000). Give it a
+# subuid/subgid range so rootless podman can map a container's users.
+RUN echo "pwuser:100000:65536" > /etc/subuid \
+ && echo "pwuser:100000:65536" > /etc/subgid
+
+# Storage: overlay backed by fuse-overlayfs (works rootless, no kernel overlay
+# mount privilege required).
+RUN mkdir -p /etc/containers \
+ && printf '%s\n' \
+      '[storage]' \
+      'driver = "overlay"' \
+      '[storage.options.overlay]' \
+      'mount_program = "/usr/bin/fuse-overlayfs"' \
+      > /etc/containers/storage.conf \
+ && printf '%s\n' \
+      '[engine]' \
+      'cgroup_manager = "cgroupfs"' \
+      'events_logger = "file"' \
+      '[containers]' \
+      'netns = "slirp4netns"' \
+      > /etc/containers/containers.conf \
+ && printf '%s\n' \
+      'unqualified-search-registries = ["docker.io"]' \
+      > /etc/containers/registries.conf
+
+# A short, well-known registries policy so `podman pull docker.io/...` works.
+RUN mkdir -p /home/pwuser/.config/containers \
+ && chown -R pwuser:pwuser /home/pwuser/.config
+
+USER pwuser
+ENV HOME=/home/pwuser
+WORKDIR /workspace
+
+# Sanity: podman present and reports rootless. (Build-time check; nesting is
+# exercised at run time by the spike.)
+RUN podman --version
+
+ENTRYPOINT ["/bin/bash"]
