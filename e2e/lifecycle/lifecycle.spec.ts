@@ -1,37 +1,85 @@
-// Generic plugin lifecycle spec (SPEC §5.4/§5.5).
+// Generic plugin lifecycle spec (SPEC §5.4/§5.5) — the template-method core.
 //
-// Drives the UI half of the template-method lifecycle against a running A0:
-//   install → verify-installed (card present) → uninstall →
-//   verify-uninstalled (card gone)
+// The skeleton lives here (devkit); a plugin supplies only the variant steps as
+// language-agnostic hook executables (Appendix E.4):
+//   tests/e2e/hooks/verify-installed     (optional)
+//   tests/e2e/hooks/verify-uninstalled   (optional)
 //
-// The container-level checks (filesystem residue baseline/diff) wrap this spec
-// in run-lifecycle.sh. The per-config matrix (cases.yaml) and per-plugin hooks
-// (Appendix E.4) layer on in increment 1c.
+// Per the active case the harness runs, in order:
+//   install → [common verify-installed] → [plugin verify-installed hook] →
+//   uninstall → [common verify-uninstalled] → [plugin verify-uninstalled hook]
+//
+// The spec runs in Node inside the devcontainer, so container-level checks use
+// `podman exec` and hooks are spawned with the documented env context.
+import { execFileSync, execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 import { test, expect } from "./fixtures";
 
 const ZIP = process.env.PLUGIN_ZIP;
-const NAME = process.env.PLUGIN_DISPLAY_NAME;
+const DISPLAY = process.env.PLUGIN_DISPLAY_NAME;
+const PLUGIN_NAME = process.env.PLUGIN_NAME; // on-disk dir name (plugin.yaml `name`)
+const A0_CONTAINER = process.env.A0_CONTAINER ?? "a0-lifecycle";
+const HOOK_DIR = process.env.HOOK_DIR; // dir holding verify-installed / verify-uninstalled
+const CASE_NAME = process.env.CASE_NAME ?? "default";
 
 test.beforeAll(() => {
-  if (!ZIP || !NAME) {
-    throw new Error("PLUGIN_ZIP and PLUGIN_DISPLAY_NAME must be set");
-  }
+  for (const [k, v] of Object.entries({ PLUGIN_ZIP: ZIP, PLUGIN_DISPLAY_NAME: DISPLAY, PLUGIN_NAME }))
+    if (!v) throw new Error(`${k} must be set`);
 });
 
-test("install → verify-installed → uninstall → verify-uninstalled", async ({
+/** Run a shell command inside the nested A0 container; throws on non-zero. */
+function inA0(cmd: string): void {
+  execSync(`podman exec ${A0_CONTAINER} sh -c ${JSON.stringify(cmd)}`, { stdio: "pipe" });
+}
+function inA0ok(cmd: string): boolean {
+  try { inA0(cmd); return true; } catch { return false; }
+}
+
+/** Run a per-plugin hook if it exists. Pass/fail by exit code (Appendix E.4). */
+function runHook(name: string): void {
+  if (!HOOK_DIR) return;
+  const hook = path.join(HOOK_DIR, name);
+  if (!fs.existsSync(hook)) return;
+  execFileSync("bash", [hook], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      A0_BASE_URL: process.env.A0_BASE_URL ?? "",
+      A0_USERNAME: process.env.A0_USERNAME ?? "admin",
+      A0_PASSWORD: process.env.A0_PASSWORD ?? "admin",
+      A0_CONTAINER,
+      PLUGIN_NAME: PLUGIN_NAME ?? "",
+      CASE_NAME,
+      A0_REPORT_DIR: process.env.A0_REPORT_DIR ?? "/tmp",
+    },
+  });
+}
+
+test(`lifecycle [${CASE_NAME}]: install → verify-installed → uninstall → verify-uninstalled`, async ({
   pluginsPage,
 }) => {
-  // Clean slate: a prior aborted run could leave it installed.
-  if (await pluginsPage.isInstalled(NAME!)) {
-    await pluginsPage.uninstall(NAME!);
-  }
-  expect(await pluginsPage.isInstalled(NAME!)).toBe(false);
+  // Clean slate.
+  if (await pluginsPage.isInstalled(DISPLAY!)) await pluginsPage.uninstall(DISPLAY!);
+  expect(await pluginsPage.isInstalled(DISPLAY!)).toBe(false);
 
-  // install + verify-installed (UI card present)
-  await pluginsPage.installFromZip(ZIP!, NAME!);
-  expect(await pluginsPage.isInstalled(NAME!)).toBe(true);
+  // install
+  await pluginsPage.installFromZip(ZIP!, DISPLAY!);
+  expect(await pluginsPage.isInstalled(DISPLAY!)).toBe(true);
 
-  // uninstall + verify-uninstalled (UI card gone)
-  await pluginsPage.uninstall(NAME!);
-  expect(await pluginsPage.isInstalled(NAME!)).toBe(false);
+  // verify-installed — common stage (devkit): the plugin's files landed.
+  expect(inA0ok(`test -d /a0/usr/plugins/${PLUGIN_NAME} && test -f /a0/usr/plugins/${PLUGIN_NAME}/plugin.yaml`)).toBe(true);
+  // verify-installed — per-plugin hook (variant step).
+  runHook("verify-installed");
+
+  // uninstall
+  await pluginsPage.uninstall(DISPLAY!);
+  expect(await pluginsPage.isInstalled(DISPLAY!)).toBe(false);
+
+  // verify-uninstalled — common stage: the plugin's OWN dir is gone (ambient
+  // builtin dirs A0 lazily creates are not residue — DEC-029).
+  expect(inA0ok(`test ! -d /a0/usr/plugins/${PLUGIN_NAME}`)).toBe(true);
+  // verify-uninstalled — per-plugin hook (variant step).
+  runHook("verify-uninstalled");
 });

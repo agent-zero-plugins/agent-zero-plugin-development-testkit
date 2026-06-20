@@ -40,7 +40,11 @@ WORK="$(mktemp -d)"
 cp -r "$E2E_DIR/." "$WORK/"
 ln -sfn "$(npm root -g)" "$WORK/node_modules"
 
-export PLUGIN_ZIP PLUGIN_DISPLAY_NAME
+# The spec (running in Node inside the devcontainer) now drives the common
+# checks + per-plugin hooks via podman exec / child_process, so it needs the
+# plugin name, the live container name, and where the plugin's hooks live.
+export PLUGIN_ZIP PLUGIN_DISPLAY_NAME PLUGIN_NAME A0_CONTAINER CASE_NAME
+export HOOK_DIR="${HOOK_DIR:-}"
 ( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts )
 
 # verify-uninstalled (fs layer, DEC-029): assert the PLUGIN'S OWN dir is gone —

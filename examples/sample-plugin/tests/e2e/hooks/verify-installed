@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Per-plugin verify-installed hook (SPEC Appendix E.4) — the template-method
+# "variant step" a plugin owns. Language-agnostic: this one uses container-exec,
+# but it could be Playwright, curl against A0_BASE_URL, etc.
+#
+# Env provided by the devkit: A0_BASE_URL, A0_USERNAME, A0_PASSWORD,
+# A0_CONTAINER, PLUGIN_NAME, CASE_NAME, A0_REPORT_DIR. Pass/fail = exit code.
+set -euo pipefail
+echo "[sample verify-installed] case=$CASE_NAME plugin=$PLUGIN_NAME"
+# This plugin's specific effectiveness check: its thumbnail asset landed.
+podman exec "$A0_CONTAINER" test -f "/a0/usr/plugins/$PLUGIN_NAME/webui/thumbnail.png"
+echo "[sample verify-installed] thumbnail asset present ✓"

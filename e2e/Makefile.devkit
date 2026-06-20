@@ -1,0 +1,58 @@
+# Devkit common targets (SPEC Appendix E.1) — the template-method skeleton.
+#
+# A consumer plugin repo sets a few vars and `-include`s this fragment. Every
+# plugin gets the same build/package/up/down/e2e interface; the ONLY per-plugin
+# variant is the verify-installed / verify-uninstalled hooks under
+# tests/e2e/hooks/ (Appendix E.4).
+#
+#   # in the plugin repo's Makefile, before the include:
+#   PLUGIN_DIR          := usr/plugins/my_plugin     # dir containing plugin.yaml
+#   PLUGIN_DISPLAY_NAME := My Plugin                 # title on the plugin card
+#   -include tests/_testkit/e2e/Makefile.devkit
+#
+# Override-able knobs:
+DEVKIT_IMAGE ?= ghcr.io/agent-zero-plugins/plugin-devkit:latest
+A0_IMAGE     ?= docker.io/agent0ai/agent-zero:latest   # DEC-019: per-plugin overridable
+DEVKIT_DIR   ?= tests/_testkit                          # where the devkit is vendored
+PLUGIN_DIR   ?= .
+DIST_DIR     ?= dist
+PLUGIN_NAME  ?= $(shell sed -nE 's/^name:[[:space:]]*"?([A-Za-z0-9_-]+)"?.*/\1/p' $(PLUGIN_DIR)/plugin.yaml 2>/dev/null | head -1)
+PLUGIN_ZIP   ?= $(DIST_DIR)/$(PLUGIN_NAME).zip
+
+# Rootless nested-container flags proven in Phase 0 (no --privileged, no docker.sock).
+PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
+  --sysctl net.ipv4.ip_unprivileged_port_start=0
+
+.PHONY: build package up down e2e conformance help-devkit
+
+build: ## assemble the plugin dir (no-op for source-only plugins)
+	@echo "build: nothing to assemble for '$(PLUGIN_NAME)'"
+
+package: ## produce the versioned plugin zip from $(PLUGIN_DIR)
+	@mkdir -p $(DIST_DIR)
+	@rm -f $(PLUGIN_ZIP)
+	cd $(PLUGIN_DIR) && zip -qr $(abspath $(PLUGIN_ZIP)) . -x '*.DS_Store' 'tests/*' '.github/*' '*/node_modules/*'
+	@echo "packaged → $(PLUGIN_ZIP)"
+
+e2e: package ## full lifecycle (install → verify-installed → uninstall → verify-uninstalled) in the devcontainer
+	podman run $(PODMAN_E2E_FLAGS) \
+	  -v $(CURDIR):/workspace:ro \
+	  -v $(abspath $(PLUGIN_ZIP)):/tmp/plugin.zip:ro \
+	  -e A0_IMAGE=$(A0_IMAGE) \
+	  -e PLUGIN_ZIP=/tmp/plugin.zip \
+	  -e PLUGIN_DISPLAY_NAME="$(PLUGIN_DISPLAY_NAME)" \
+	  -e PLUGIN_NAME=$(PLUGIN_NAME) \
+	  -e HOOK_DIR=/workspace/tests/e2e/hooks \
+	  $(DEVKIT_IMAGE) -lc 'bash /workspace/$(DEVKIT_DIR)/e2e/harness/run-lifecycle.sh'
+
+up: ## boot A0 nested for manual/agent exploration (inside the devcontainer)
+	podman run $(PODMAN_E2E_FLAGS) -it \
+	  -v $(CURDIR):/workspace:ro -e A0_IMAGE=$(A0_IMAGE) \
+	  $(DEVKIT_IMAGE) -lc 'bash /workspace/$(DEVKIT_DIR)/e2e/harness/a0-up.sh && echo "A0 on :80 — exec in to explore" && sleep infinity'
+
+conformance: ## assert this repo exposes the frozen target set + allowed assets
+	@for t in build package up e2e; do \
+	  $(MAKE) -n $$t >/dev/null 2>&1 || { echo "missing target: $$t"; exit 1; }; \
+	done
+	@test -f tests/e2e/hooks/verify-installed || echo "note: no tests/e2e/hooks/verify-installed (optional)"
+	@echo "conformance OK"
