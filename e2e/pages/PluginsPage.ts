@@ -237,7 +237,7 @@ export class PluginsPage {
     // install inside the container can take ~30–60s on a cold cache.
     await expect(
       this.installDialog.getByText(/Plugin installed:/),
-    ).toBeVisible({ timeout: 90_000 });
+    ).toBeVisible({ timeout: 180_000 });
 
     // A0 does NOT auto-refresh the Plugins list after install — and
     // plugin-contributed extension HTML (e.g. the Talk button in the
