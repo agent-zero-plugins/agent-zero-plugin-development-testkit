@@ -19,6 +19,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        # The fork image (ghcr.io/nuevanext/agent-zero, bundles ML deps e.g.
+        # onnxruntime) is larger than upstream's 8.76GB and exhausts the runner
+        # disk during the nested unpack. Reclaim ~30GB of preinstalled tooling.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                      /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "after reclaim:"; df -h / | tail -1
+
       - name: Build devcontainer (rootless)
         run: podman build -t plugin-devkit:ci -f devcontainer/Containerfile devcontainer
 
