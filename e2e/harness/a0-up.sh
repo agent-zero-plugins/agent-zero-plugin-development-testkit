@@ -14,7 +14,7 @@ A0_NAME="${A0_NAME:-a0-lifecycle}"
 A0_HTTP_PORT="${A0_HTTP_PORT:-80}"
 AUTH_LOGIN="${AUTH_LOGIN:-admin}"
 AUTH_PASSWORD="${AUTH_PASSWORD:-admin}"
-BOOT_TIMEOUT="${BOOT_TIMEOUT:-720}"
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-1080}"
 INSTANCE_ENV="${INSTANCE_ENV:-/tmp/a0-instance.env}"
 
 log(){ printf '\033[1;36m[a0-up]\033[0m %s\n' "$*"; }
