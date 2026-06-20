@@ -29,6 +29,31 @@ test.beforeAll(() => {
     if (!v) throw new Error(`${k} must be set`);
 });
 
+// On failure, dump any open modals/backdrops so the CI log shows what (if
+// anything) was intercepting clicks — invaluable for diagnosing UI-harness
+// edges across the diverse plugin fleet.
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    try {
+      const overlays = await page
+        .locator("div.modal.show, div.modal-backdrop")
+        .evaluateAll((els) =>
+          els.map((e) => ({
+            modalPath: e.getAttribute("data-modal-path"),
+            cls: e.className,
+            display: getComputedStyle(e).display,
+            pe: getComputedStyle(e).pointerEvents,
+          })),
+        );
+      console.log("::group::open overlays at failure");
+      console.log(JSON.stringify(overlays, null, 2));
+      console.log("::endgroup::");
+    } catch (e) {
+      console.log("overlay dump failed:", String(e));
+    }
+  }
+});
+
 /** Run a shell command inside the nested A0 container; throws on non-zero. */
 function inA0(cmd: string): void {
   execSync(`podman exec ${A0_CONTAINER} sh -c ${JSON.stringify(cmd)}`, { stdio: "pipe" });

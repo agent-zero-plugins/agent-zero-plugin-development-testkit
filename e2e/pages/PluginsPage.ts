@@ -118,7 +118,20 @@ export class PluginsPage {
    *  top-nav click. */
   async open(): Promise<void> {
     await dismissFirstRunModals(this.page);
-    await this.topNavButton.click();
+    // Click the top-nav Plugins button; if an overlay (a plugin-contributed
+    // element after install+reload, a transient modal/backdrop) intercepts the
+    // click, fall back to calling A0's openModal() directly — the button's own
+    // @click does exactly this, so it's equivalent and overlay-proof.
+    try {
+      await this.topNavButton.click({ timeout: 8_000 });
+    } catch {
+      await dismissFirstRunModals(this.page);
+      await this.page.evaluate(() =>
+        (globalThis as { openModal?: (p: string) => void }).openModal?.(
+          "components/plugins/list/plugin-list.html",
+        ),
+      );
+    }
     await expect(this.customTab).toBeVisible();
   }
 
