@@ -1,0 +1,122 @@
+# Reusable devkit-sync workflow (SPEC DEC-044).
+#
+# Ported from the skills-sync mechanism, but devkit-scoped: it keeps a consumer
+# plugin repo's vendored devkit submodule (tests/_testkit →
+# agent-zero-plugin-development-testkit) current by bumping it to the devkit's
+# latest main and opening an auto-merge PR. No `.skills`, no asset re-linking —
+# the submodule IS the content.
+#
+# A consumer invokes it via a thin caller (templates/devkit-sync.caller.yml,
+# copied in by `make link-workflows`):
+#
+#   jobs:
+#     sync:
+#       uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/devkit-sync.yml@main
+#       with: { devkit-submodule-path: "tests/_testkit" }
+#       secrets:
+#         SKILLS_SYNC_APP_CLIENT_ID:  ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+#         SKILLS_SYNC_APP_PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+#
+# Auth model (same as skills-sync): an App-minted token (Contents:Read on the
+# devkit repo) is used ONLY for the cross-repo submodule fetch; the consumer's
+# GITHUB_TOKEN does the branch push + PR + auto-merge. GITHUB_TOKEN cannot write
+# .github/workflows/, so this workflow never touches workflow files — only the
+# submodule pin.
+name: devkit-sync
+
+on:
+  workflow_call:
+    inputs:
+      devkit-submodule-path:
+        description: "Path to the vendored devkit submodule in the consumer."
+        required: false
+        type: string
+        default: "tests/_testkit"
+      branch-name:
+        description: "Branch name for the sync PR."
+        required: false
+        type: string
+        default: "chore/devkit-sync"
+      auto-merge:
+        description: "Enable auto-merge on the PR (requires branch protection)."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SKILLS_SYNC_APP_CLIENT_ID:
+        description: "OAuth Client ID (Iv23li…) of the sync GitHub App."
+        required: true
+      SKILLS_SYNC_APP_PRIVATE_KEY:
+        description: "PEM of the sync GitHub App's private key."
+        required: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint App installation token (read-only — devkit submodule clone)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout consumer repo (GITHUB_TOKEN, no submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Bump the devkit submodule to latest main (App token)
+        id: bump
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        run: |
+          set -euo pipefail
+          AUTH=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          GIT_AUTH=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH")
+          git "${GIT_AUTH[@]}" submodule update --init "$DEVKIT_PATH"
+          before=$(git -C "$DEVKIT_PATH" rev-parse HEAD)
+          git -C "$DEVKIT_PATH" "${GIT_AUTH[@]}" fetch origin main
+          git -C "$DEVKIT_PATH" checkout --detach FETCH_HEAD
+          after=$(git -C "$DEVKIT_PATH" rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "devkit already at $after — nothing to sync."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "devkit $before → $after"
+            git add "$DEVKIT_PATH"
+          fi
+
+      - name: Commit, push, PR, auto-merge (GITHUB_TOKEN)
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ inputs.branch-name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          AUTO_MERGE: ${{ inputs.auto-merge }}
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
+          git checkout -B "$BRANCH_NAME"
+          git commit -m "chore: sync devkit submodule to latest main"
+          git push --force-with-lease origin "$BRANCH_NAME"
+
+          body="Automated devkit sync — bumped \`$DEVKIT_PATH\` to the devkit's latest \`main\`."
+          existing=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "chore: sync devkit submodule" --body "$body"
+            pr="$existing"
+          else
+            gh pr create --title "chore: sync devkit submodule" --body "$body" --head "$BRANCH_NAME" --base "$DEFAULT_BRANCH"
+            pr=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+          fi
+          if [ "$AUTO_MERGE" = "true" ] && [ -n "$pr" ]; then
+            gh pr merge "$pr" --auto --squash || echo "::warning::auto-merge not enabled (branch protection?)."
+          fi
