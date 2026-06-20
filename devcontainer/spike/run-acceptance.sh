@@ -16,7 +16,11 @@ set -euo pipefail
 
 # Fully-qualified: podman/stable enforces short-name resolution (no TTY to prompt in CI).
 A0_IMAGE="${A0_IMAGE:-docker.io/agent0ai/agent-zero:latest}"   # DEC-019: parameterized
-A0_HTTP_PORT="${A0_HTTP_PORT:-8080}"
+# A0 serves on port 80. Under nested rootless, the inner A0 container shares the
+# devcontainer's network namespace (--network=host); binding 80 there is allowed
+# because the WORKFLOW runs the devcontainer with
+# --sysctl net.ipv4.ip_unprivileged_port_start=0. So we reach A0 at localhost:80.
+A0_HTTP_PORT="${A0_HTTP_PORT:-80}"
 A0_NAME="a0-spike"
 AUTH_LOGIN="${AUTH_LOGIN:-admin}"
 AUTH_PASSWORD="${AUTH_PASSWORD:-admin}"
@@ -45,7 +49,7 @@ log "    ✓ nested rootless container ran"
 # --- 2. boot the real A0 image nested -----------------------------------------
 log "2/3 booting A0 nested: $A0_IMAGE on :$A0_HTTP_PORT"
 podman run -d --name "$A0_NAME" \
-  -p "${A0_HTTP_PORT}:80" \
+  --network=host \
   -e AUTH_LOGIN="$AUTH_LOGIN" -e AUTH_PASSWORD="$AUTH_PASSWORD" \
   -e A0_SEEDED_SETTINGS_JSON='{}' \
   -e BRANCH=main \

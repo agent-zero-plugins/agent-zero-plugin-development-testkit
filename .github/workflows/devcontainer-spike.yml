@@ -42,6 +42,7 @@ jobs:
           podman run --rm \
             --device /dev/fuse \
             --security-opt label=disable \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -e A0_IMAGE="$A0_IMAGE" \
             -v "$PWD":/workspace:Z \
             -w /workspace \
