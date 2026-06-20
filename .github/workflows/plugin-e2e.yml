@@ -102,7 +102,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          ( cd "$PLUGIN_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip" . -x 'tests/*' '.github/*' '*/node_modules/*' )
+          # Exclude the standardization wrapper + repo meta so root-layout
+          # plugins (.devkit.yml plugin_dir: .) don't pack .git, the devkit
+          # submodule (tests/_testkit), caller workflows, etc. into the zip.
+          # No-ops for subdir layouts (those dirs aren't inside PLUGIN_DIR).
+          ( cd "$PLUGIN_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip" . \
+              -x '.git/*' 'tests/*' '.github/*' '.skills/*' 'dist/*' '*/node_modules/*' \
+                 '.devkit.yml' '.gitmodules' '.gitignore' )
           HOOK_DIR_REL="tests/e2e/hooks"
           podman run --rm \
             --device /dev/fuse \
