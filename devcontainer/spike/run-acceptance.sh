@@ -20,7 +20,10 @@ A0_HTTP_PORT="${A0_HTTP_PORT:-8080}"
 A0_NAME="a0-spike"
 AUTH_LOGIN="${AUTH_LOGIN:-admin}"
 AUTH_PASSWORD="${AUTH_PASSWORD:-admin}"
-BOOT_TIMEOUT="${BOOT_TIMEOUT:-300}"
+# First boot in cold CI = image pull + initialize.sh (clone BRANCH + pip install),
+# which comfortably exceeds 5 min on a fresh runner. CI run cd3db4e showed A0's
+# services reaching RUNNING right as a 300s window expired — so give it room.
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-720}"
 BASE="http://localhost:${A0_HTTP_PORT}"
 COOKIES="$(mktemp)"
 
@@ -55,7 +58,11 @@ podman run -d --name "$A0_NAME" \
 log "    waiting up to ${BOOT_TIMEOUT}s for /login ..."
 deadline=$(( SECONDS + BOOT_TIMEOUT ))
 until curl -sf "$BASE/login" >/dev/null 2>&1; do
-  [ $SECONDS -ge $deadline ] && { podman logs --tail 50 "$A0_NAME" || true; fail "A0 did not become healthy in ${BOOT_TIMEOUT}s"; }
+  if [ $SECONDS -ge $deadline ]; then
+    echo "--- curl -v (last attempt) ---"; curl -v "$BASE/login" 2>&1 | tail -15 || true
+    echo "--- podman logs (tail) ---"; podman logs --tail 80 "$A0_NAME" || true
+    fail "A0 did not become healthy in ${BOOT_TIMEOUT}s"
+  fi
   sleep 3
 done
 log "    ✓ A0 booted nested; /login is healthy"
