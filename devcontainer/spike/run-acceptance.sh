@@ -53,6 +53,13 @@ podman run -d --name "$A0_NAME" \
   bash -c 'set -e; mkdir -p /a0/usr;
            printf "AUTH_LOGIN=%s\nAUTH_PASSWORD=%s\n" "$AUTH_LOGIN" "$AUTH_PASSWORD" > /a0/usr/.env;
            printf "%s\n" "$A0_SEEDED_SETTINGS_JSON" > /a0/usr/settings.json;
+           # Rootless-nesting workaround: /usr/sbin/sshd exits 255 under rootless
+           # podman (privsep needs caps a mapped-root lacks). A0s supervisor
+           # event-listener kills the WHOLE instance on any process FATAL, so a
+           # flapping sshd takes A0 down ~8s after boot. SSH is irrelevant to the
+           # HTTP e2e, so replace sshd with a no-op that never exits → run_sshd
+           # stays RUNNING, watchdog stays armed for genuinely-critical procs.
+           printf "#!/bin/sh\nexec tail -f /dev/null\n" > /usr/sbin/sshd; chmod +x /usr/sbin/sshd;
            exec /exe/initialize.sh "$BRANCH"' >/dev/null
 
 log "    waiting up to ${BOOT_TIMEOUT}s for /login ..."
