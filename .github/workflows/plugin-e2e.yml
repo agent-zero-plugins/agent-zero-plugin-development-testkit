@@ -1,69 +1,109 @@
-# Reusable plugin e2e workflow (SPEC DEC-020). A plugin repo invokes it:
+# Reusable plugin-e2e workflow (SPEC DEC-020/044).
 #
-#   jobs:
-#     e2e:
-#       uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@v1
-#       with:
-#         plugin_dir: usr/plugins/my_plugin
-#         plugin_display_name: "My Plugin"
-#
-# It builds the devkit devcontainer from the vendored devkit, packages the
-# plugin, and runs the full install → verify-installed → uninstall →
-# verify-uninstalled lifecycle with A0 booted NESTED + rootless (Phase-0 model).
+# A consumer plugin repo invokes it via a thin, parameter-free caller
+# (templates/plugin-e2e.caller.yml, copied in by `make link-workflows`). It:
+#   1. mints the sync-App token (to clone the private devkit submodule),
+#   2. checks out the consumer + inits its devkit submodule (tests/_testkit),
+#   3. resolves the plugin (.devkit.yml `plugin_dir` → else usr/plugins/<name>,
+#      per DEC-042/043),
+#   4. builds the devkit devcontainer, packages the plugin, and runs the full
+#      install → verify-installed → uninstall → verify-uninstalled lifecycle
+#      with A0 booted NESTED + rootless (Phase-0 model).
 name: plugin-e2e
 
 on:
   workflow_call:
     inputs:
-      plugin_dir:
-        description: "Directory containing the plugin's plugin.yaml."
-        required: true
-        type: string
-      plugin_display_name:
-        description: "Plugin title as shown on its card in A0."
-        required: true
-        type: string
       a0_image:
-        description: "A0 image under test (DEC-019). Override to the fork if needed."
+        description: "A0 image under test (overridden by .devkit.yml a0_image)."
         required: false
         type: string
         default: "docker.io/agent0ai/agent-zero:latest"
-      devkit_dir:
+      devkit-submodule-path:
         description: "Path to the vendored devkit submodule."
         required: false
         type: string
         default: "tests/_testkit"
-      hook_dir:
-        description: "Directory holding the plugin's verify-* hooks."
-        required: false
-        type: string
-        default: "tests/e2e/hooks"
+    secrets:
+      SKILLS_SYNC_APP_CLIENT_ID:
+        description: "Sync App OAuth Client ID (to clone the private devkit)."
+        required: true
+      SKILLS_SYNC_APP_PRIVATE_KEY:
+        description: "Sync App private-key PEM."
+        required: true
 
 jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - name: Mint App token (read-only — devkit submodule clone)
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
-          submodules: recursive
+          client-id: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
 
-      - name: Build devkit devcontainer (rootless)
-        run: podman build -t plugin-devkit:ci -f "${{ inputs.devkit_dir }}/devcontainer/Containerfile" "${{ inputs.devkit_dir }}/devcontainer"
+      - name: Checkout consumer (GITHUB_TOKEN, no submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: false
 
-      - name: Package plugin + run lifecycle (A0 nested, unprivileged)
+      - name: Init devkit submodule (App token)
         env:
-          PLUGIN_DIR: ${{ inputs.plugin_dir }}
-          PLUGIN_DISPLAY_NAME: ${{ inputs.plugin_display_name }}
-          A0_IMAGE: ${{ inputs.a0_image }}
-          DEVKIT_DIR: ${{ inputs.devkit_dir }}
-          HOOK_DIR_REL: ${{ inputs.hook_dir }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        run: |
+          AUTH=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            submodule update --init "$DEVKIT_PATH"
+
+      - name: Resolve plugin (.devkit.yml → else usr/plugins/<name>)
+        id: resolve
+        env:
+          INPUT_A0_IMAGE: ${{ inputs.a0_image }}
         run: |
           set -euo pipefail
-          PLUGIN_NAME=$(sed -nE 's/^name:[[:space:]]*"?([A-Za-z0-9_-]+)"?.*/\1/p' "$PLUGIN_DIR/plugin.yaml" | head -1)
-          echo "plugin: $PLUGIN_NAME"
+          y(){ sed -nE "s/^$1:[[:space:]]*\"?([^\"]+)\"?.*/\1/p" "$2" 2>/dev/null | head -1; }
+          plugin_dir="" display_name="" cfg_a0=""
+          if [ -f .devkit.yml ]; then
+            plugin_dir=$(y plugin_dir .devkit.yml)
+            display_name=$(y display_name .devkit.yml)
+            cfg_a0=$(y a0_image .devkit.yml)
+          fi
+          if [ -z "$plugin_dir" ]; then
+            plugin_dir=$(dirname "$(find usr/plugins -maxdepth 2 -name plugin.yaml 2>/dev/null | head -1)")
+          fi
+          [ -d "$plugin_dir" ] && [ -f "$plugin_dir/plugin.yaml" ] || {
+            echo "::error::could not resolve plugin_dir (set .devkit.yml plugin_dir or use usr/plugins/<name>/)"; exit 1; }
+          plugin_name=$(y name "$plugin_dir/plugin.yaml")
+          [ -n "$display_name" ] || display_name=$(y title "$plugin_dir/plugin.yaml")
+          [ -n "$display_name" ] || display_name="$plugin_name"
+          a0_image="${cfg_a0:-$INPUT_A0_IMAGE}"
+          echo "plugin_dir=$plugin_dir"       >> "$GITHUB_OUTPUT"
+          echo "plugin_name=$plugin_name"     >> "$GITHUB_OUTPUT"
+          echo "display_name=$display_name"   >> "$GITHUB_OUTPUT"
+          echo "a0_image=$a0_image"           >> "$GITHUB_OUTPUT"
+          echo "Resolved: dir=$plugin_dir name=$plugin_name display='$display_name' a0=$a0_image"
+
+      - name: Build devkit devcontainer (rootless)
+        env:
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        run: podman build -t plugin-devkit:ci -f "$DEVKIT_PATH/devcontainer/Containerfile" "$DEVKIT_PATH/devcontainer"
+
+      - name: Package + run lifecycle (A0 nested, unprivileged)
+        env:
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+          PLUGIN_DIR: ${{ steps.resolve.outputs.plugin_dir }}
+          PLUGIN_NAME: ${{ steps.resolve.outputs.plugin_name }}
+          DISPLAY_NAME: ${{ steps.resolve.outputs.display_name }}
+          A0_IMAGE: ${{ steps.resolve.outputs.a0_image }}
+        run: |
+          set -euo pipefail
           mkdir -p dist
           ( cd "$PLUGIN_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip" . -x 'tests/*' '.github/*' '*/node_modules/*' )
+          HOOK_DIR_REL="tests/e2e/hooks"
           podman run --rm \
             --device /dev/fuse \
             --security-opt label=disable \
@@ -72,8 +112,8 @@ jobs:
             -v "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip":/tmp/plugin.zip:ro \
             -e A0_IMAGE="$A0_IMAGE" \
             -e PLUGIN_ZIP=/tmp/plugin.zip \
-            -e PLUGIN_DISPLAY_NAME="$PLUGIN_DISPLAY_NAME" \
+            -e PLUGIN_DISPLAY_NAME="$DISPLAY_NAME" \
             -e PLUGIN_NAME="$PLUGIN_NAME" \
             -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
             plugin-devkit:ci \
-            -lc 'bash /workspace/'"$DEVKIT_DIR"'/e2e/harness/run-lifecycle.sh'
+            -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'

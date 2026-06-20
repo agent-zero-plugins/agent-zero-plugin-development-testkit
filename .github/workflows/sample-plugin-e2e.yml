@@ -1,21 +1,41 @@
-# Dogfood: run the devkit's OWN reusable plugin-e2e workflow against the bundled
-# sample plugin. Proves the full lifecycle (install → verify-installed →
-# uninstall → verify-uninstalled, A0 nested rootless) on a GitHub-hosted runner —
-# and that the reusable workflow + Makefile/harness all compose.
+# Devkit self-test: run the full lifecycle against the bundled sample plugin on
+# a GitHub runner. Self-contained (the devkit IS the devkit here — no submodule,
+# no App token), so it exercises the HARNESS. The consumer DISTRIBUTION path
+# (devkit submodule + App-token + reusable plugin-e2e.yml) is exercised by
+# onboarding a real plugin repo (e.g. livekit).
 name: sample-plugin-e2e
 
 on:
   push:
-    branches: ["main", "phase1/playwright-fedora"]
+    branches: ["main", "feat/devkit-sync-distribution"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
 
 jobs:
   sample-e2e:
-    uses: ./.github/workflows/plugin-e2e.yml
-    with:
-      plugin_dir: examples/sample-plugin
-      plugin_display_name: "Sample Plugin"
-      devkit_dir: "."
-      hook_dir: examples/sample-plugin/tests/e2e/hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build devcontainer (rootless)
+        run: podman build -t plugin-devkit:ci -f devcontainer/Containerfile devcontainer
+
+      - name: Package sample + run lifecycle (A0 nested, unprivileged)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ( cd examples/sample-plugin && zip -qr "$GITHUB_WORKSPACE/dist/sample_plugin.zip" . -x 'tests/*' )
+          podman run --rm \
+            --device /dev/fuse \
+            --security-opt label=disable \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -v "$GITHUB_WORKSPACE":/workspace:ro \
+            -v "$GITHUB_WORKSPACE/dist/sample_plugin.zip":/tmp/plugin.zip:ro \
+            -e PLUGIN_ZIP=/tmp/plugin.zip \
+            -e PLUGIN_DISPLAY_NAME="Sample Plugin" \
+            -e PLUGIN_NAME=sample_plugin \
+            -e HOOK_DIR=/workspace/examples/sample-plugin/tests/e2e/hooks \
+            plugin-devkit:ci \
+            -lc 'bash /workspace/e2e/harness/run-lifecycle.sh'

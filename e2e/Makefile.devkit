@@ -12,8 +12,11 @@
 #
 # Override-able knobs:
 DEVKIT_IMAGE ?= ghcr.io/agent-zero-plugins/plugin-devkit:latest
-A0_IMAGE     ?= docker.io/agent0ai/agent-zero:latest   # DEC-019: per-plugin overridable
-DEVKIT_DIR   ?= tests/_testkit                          # where the devkit is vendored
+# A0_IMAGE: DEC-019, per-plugin overridable. DEVKIT_DIR: where the devkit is vendored.
+# (No inline comments on these assignments — Make would fold the trailing spaces
+#  into the value and break $(VAR)/path concatenation.)
+A0_IMAGE     ?= docker.io/agent0ai/agent-zero:latest
+DEVKIT_DIR   ?= tests/_testkit
 PLUGIN_DIR   ?= .
 DIST_DIR     ?= dist
 PLUGIN_NAME  ?= $(shell sed -nE 's/^name:[[:space:]]*"?([A-Za-z0-9_-]+)"?.*/\1/p' $(PLUGIN_DIR)/plugin.yaml 2>/dev/null | head -1)
@@ -23,7 +26,14 @@ PLUGIN_ZIP   ?= $(DIST_DIR)/$(PLUGIN_NAME).zip
 PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
   --sysctl net.ipv4.ip_unprivileged_port_start=0
 
-.PHONY: build package up down e2e conformance help-devkit
+.PHONY: build package up down e2e conformance link-workflows help-devkit
+
+link-workflows: ## copy the devkit-sync + plugin-e2e caller workflows into .github/workflows/ (DEC-044)
+	@mkdir -p .github/workflows
+	@cp $(DEVKIT_DIR)/templates/devkit-sync.caller.yml .github/workflows/devkit-sync.yml
+	@cp $(DEVKIT_DIR)/templates/plugin-e2e.caller.yml .github/workflows/plugin-e2e.yml
+	@echo "[wf] linked devkit-sync.yml + plugin-e2e.yml → .github/workflows/"
+	@echo "[wf] (GITHUB_TOKEN can't push workflow files in nightly sync — commit these once.)"
 
 build: ## assemble the plugin dir (no-op for source-only plugins)
 	@echo "build: nothing to assemble for '$(PLUGIN_NAME)'"
