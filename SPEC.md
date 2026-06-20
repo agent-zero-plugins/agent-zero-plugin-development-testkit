@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved** — two-tier fork model (DEC-049/054), 18 `upstream` / 1 `fork-required`, `docs/a0-compatibility.md`)
+**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -746,12 +746,18 @@ points, when fork support landed) and then frozen by the matrix result.
   **target** reference (DEC-054). `agent-zero-operator/agent-zero` carries only infra changes
   today and **none** of the plugin `@extensible` seams, so it is NOT yet a valid test target.
 
-**Theme-4 result:** of the 19, **18 are `upstream` and exactly one is `fork-required`** —
-`context-scoping` (needs the `@extensible` seam on `_memory.get_agent_memory_subdir` + four
-sibling memory/skills/subagent seams, present in `NuevaNext/agent-zero@nuevanext`, absent in
-stock upstream). **It is the proof case for DEC-053:** it ships *no* behaviour hook and *no*
-`a0_image` override, so its e2e is green on stock upstream **where its scoping is inert** — a
-presence-only test masking a real regression. The full per-plugin classification +
+**Theme-4 result (rigorous 19-subagent audit, all high confidence):** **18 `upstream` / 1
+`fork-required`** — `context-scoping` (7 fork-only `@extensible` memory/skills/subagent seams).
+**Reconciliation:** the fork made *many* plugin-supporting changes historically (27 `@extensible`
+seams, ~200 commits), but the audit shows the great majority were **upstreamed** into stock
+`agent0ai/agent-zero` (the whole webui `<x-extension>` framework, `init_a0` `@extensible`,
+`usr/plugins` discovery, the `api/` area, notifications, `get_api_key`, …) — so *historical fork
+contribution ≠ current fork dependency*; only context-scoping's 7 seams remain un-upstreamed.
+**context-scoping is the proof case for DEC-053:** it ships *no* behaviour hook and *no* `a0_image`
+override, so its e2e is green on stock upstream **where its scoping is inert** — a presence-only
+test masking a real regression. _This static audit is the current best evidence; the durable proof
+is the DEC-049 e2e behaviour matrix once behaviour hooks exist (18/19 lack them)._ The full
+per-plugin classification +
 evidence is committed at `docs/a0-compatibility.md`. _Theme 4; Q-025 closed; repoint-to-public
 timing = Q-029._
 
