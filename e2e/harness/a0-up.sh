@@ -21,6 +21,15 @@ log(){ printf '\033[1;36m[a0-up]\033[0m %s\n' "$*"; }
 
 podman rm -f "$A0_NAME" >/dev/null 2>&1 || true
 
+# Private-registry pull auth (DEC-055/Q-030): if ghcr creds are provided, log in
+# so a private fork image (ghcr.io/nuevanext/agent-zero) can be pulled. No creds
+# ⇒ skipped (public images need none).
+if [ -n "${GHCR_TOKEN:-}" ]; then
+  log "podman login ghcr.io (private fork-image pull)"
+  printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null 2>&1 \
+    || { echo "[a0-up] ghcr login failed (check GHCR_PULL_TOKEN: read:packages on NuevaNext)" >&2; exit 1; }
+fi
+
 log "booting $A0_IMAGE (nested, rootless, host-net) as '$A0_NAME'"
 podman run -d --name "$A0_NAME" --network=host \
   -e AUTH_LOGIN="$AUTH_LOGIN" -e AUTH_PASSWORD="$AUTH_PASSWORD" \
