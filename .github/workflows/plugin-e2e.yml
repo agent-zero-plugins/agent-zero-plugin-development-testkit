@@ -59,6 +59,25 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
             submodule update --init "$DEVKIT_PATH"
 
+      - name: Build plugin (optional — .devkit.yml `build:`)
+        # Build-generated plugins (e.g. a vendored upstream compiled into a
+        # plugin dir) declare a `build:` command in .devkit.yml. It runs on the
+        # runner (python3/make/git/zip available) BEFORE resolve+package, and is
+        # responsible for initialising any of its OWN (public) submodules it
+        # needs — e.g. `git submodule update --init upstream && make build`.
+        # Absent `build:` → no-op, so this step is transparent to the fleet.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          build=$(sed -nE 's/^build:[[:space:]]*"?([^"]+)"?.*/\1/p' .devkit.yml 2>/dev/null | head -1)
+          if [ -n "$build" ]; then
+            echo "::group::build: $build"
+            bash -euo pipefail -c "$build"
+            echo "::endgroup::"
+          else
+            echo "no .devkit.yml build: step — skipping"
+          fi
+
       - name: Resolve plugin (.devkit.yml → else usr/plugins/<name>)
         id: resolve
         env:
