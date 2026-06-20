@@ -1,0 +1,973 @@
+# SPEC — Agent Zero Plugin Quality & Structure Standard
+
+**Status:** Reviewable (iteration 8 — Cycle-1 (harness/layout/distribution) SHIPPED, fan-out complete (19/19 standardized + merged; `phantom-bridge` excepted, public fork); Cycle-2 (authoring & polish standard, §5.7–5.13 / DEC-045–053) drafted; pre-SPEC-REVIEW-002)
+
+> **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
+> standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
+> see: the SPEC + knowledge committed here (not in assistant memory) · vendored authoring
+> skills + a shared `CLAUDE.md` block · per-repo `DEVELOPING.md` · a fixed README skeleton
+> with harness-captured screenshots/GIFs, the *why*, inter-plugin deps, and declared
+> upstream-vs-fork A0 compatibility · Apache-2.0 across first-party repos · real
+> thumbnail+description · an in-A0 `doctor` script · and **behaviour-level** verify (not
+> implementation tests) wired into the PR gate. Themes → §5.7–5.13, DEC-045–053, Q-025–028.
+
+**Canonical home:** `agent-zero-plugins/agent-zero-plugin-development-testkit/SPEC.md` (per DEC-025; **now committed here** — DEC-045 retires the workshop copy as system-of-record).
+**Review trail:** `SPEC-REVIEW-001.md` (31 findings; closures cited in DEC-026…DEC-037). SPEC-REVIEW-002 pending (Cycle-2).
+
+This specification defines a single, durable contract that every Agent Zero plugin
+repository conforms to: a common build/test interface, a three-operation CI surface
+(install / verify / uninstall), and a shared "devkit" that holds all reusable heavy
+lifting so individual plugin repos carry only their plugin-specific differences.
+
+The design intent is the **template-method pattern at the repository level**: the
+skeleton of every operation (build, package, install, uninstall, and the harness that
+runs them) lives once in the devkit; each plugin repo supplies only the variant
+steps — initially just `verify` — through a fixed, well-known seam.
+
+---
+
+## Conformance keywords
+
+The keywords **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHALL NOT**, **SHOULD**,
+**SHOULD NOT**, **RECOMMENDED**, **MAY**, and **OPTIONAL** are to be interpreted as
+described in RFC 2119.
+
+---
+
+## 1. Scope
+
+This spec covers the shared quality and structure standard applied across the
+`agent-zero-plugins` GitHub organisation:
+
+- The **devkit** — the shared component holding reusable test/build/CI heavy lifting
+  (currently `agent-zero-plugin-development-testkit`).
+- The **common Makefile interface** — the target vocabulary every plugin repo exposes.
+- The **three-operation CI interface** — install, verify, uninstall — and the cleanup
+  assertions that gate a green build.
+- The **per-plugin seam(s)** — what an individual plugin repo is allowed/required to
+  override, starting with `verify`.
+- The **rollout** — how the standard reaches the ~20 existing plugin repos and the
+  template, and how it stays in sync thereafter.
+
+## 2. Goals / non-goals
+
+### Goals
+- G1. One plugin repo looks like every other plugin repo at the build/test/CI surface.
+- G2. The expensive logic (docker startup, Playwright flows, versioning, reusable
+  workflows) lives in exactly one place and is consumed, not copied.
+- G3. Adding a new per-plugin behaviour (today: `verify`) is the *only* work an author
+  does to get a fully-gated CI pipeline.
+- G4. The CI interface is three legible operations whose pass/fail an operator can read
+  without understanding the plugin: install succeeds, plugin verifies, uninstall leaves
+  no residue.
+- G5. The contract is mechanical to conform to and mechanical to check — a plugin either
+  conforms or fails a gate.
+
+### Non-goals
+- NG1. Re-architecting the A0 plugin runtime API. The runtime install/uninstall
+  endpoints are treated as a fixed dependency, not a thing this spec changes.
+- NG2. Replacing the existing L0–L2 Python testkit assertions. They stay; this spec is
+  about the L3 (e2e) interface and the repo-level structure around it.
+- NG3. Changing the gate/OCI publish pipeline (`agent-zero-vendor-plugins`) beyond what
+  the new CI interface requires.
+
+## 3. Out of scope (with rationale)
+
+- OOS1. **MCP servers** (`agent-zero-mcps`) — different conformity contract already
+  exists (`mcp-image-conformity-contract`). This spec is plugins-only.
+- OOS2. **The A0 runtime fork itself** — its plugin API is an upstream dependency here.
+- OOS3. **Non-`agent-zero-plugins` plugin repos** (e.g. third-party `agkonnect/*`) —
+  they MAY adopt the standard but are not bound by it.
+
+## 4. Glossary
+
+- **Devkit** — the shared component (`agent-zero-plugin-development-testkit`) that holds
+  reusable heavy lifting consumed by every plugin repo.
+- **Harness** — the docker + Playwright machinery that boots an A0 instance and drives
+  plugin operations against it.
+- **The three operations** — `install`, `verify`, `uninstall`, the CI-facing interface.
+- **Seam** — the fixed extension point where a plugin repo supplies its variant logic
+  (template-method "hook method").
+- **Common Makefile** — the target set every plugin repo exposes identically.
+- **Gate** — `agent-zero-vendor-plugins`, the curated repo whose merge-to-main publishes
+  a plugin as an OCI artifact.
+- **Cleanup verification** — the assertions proving uninstall left no residue on disk,
+  in the API, or in the UI.
+- **Doctor** — a per-plugin health script runnable inside a booted A0 that checks the
+  plugin's dependencies, config, and extension-point mounting (DEC-052).
+- **Behaviour verify** — a check that exercises the plugin's *running behaviour* against a
+  live A0 instance (UI/API), as opposed to implementation/unit tests (DEC-053).
+- **A0 compatibility** — a plugin's declared dependency on stock upstream A0 vs. the
+  operator's A0 fork (`a0_compat: upstream | fork-required`, DEC-049).
+- **Common CLAUDE block** — the marker-delimited, org-identical guidance block every
+  plugin repo's `CLAUDE.md` carries, refreshed by sync (DEC-046).
+- **Behaviour media** — harness-captured screenshot + GIF/video of the plugin installed
+  and behaving in A0, committed as the README's visuals (DEC-051).
+
+---
+
+## 5. Requirements
+
+_(REQs are added cluster-by-cluster as decisions are made.)_
+
+### 5.1 Devkit & distribution (DEV)
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-DEV-001 | All reusable test/build/CI logic (harness boot, Playwright flows, lifecycle orchestration, residue scanning, versioning, the devcontainer definition) **MUST** live in the devkit. Plugin repos **MUST NOT** copy or reimplement it. | DEC-003, DEC-015 | Devkit |
+| REQ-DEV-002 | Plugin repos **MUST** vendor **only the devkit** (git submodule), **MUST NOT** vendor the full skills library, and **MUST** keep the vendored surface minimal — preferring submodule references over copied files. | DEC-015 | Devkit, submodule |
+| REQ-DEV-003 | The devkit **MUST** publish a **devcontainer image** carrying all execution tooling (Playwright, SSH, node, rootless podman + nesting tooling) that runs the A0 container **nested and unprivileged**. The same image **MUST** be usable as CI runner, developer dev container, and AI-agent local environment. | DEC-018 | Devkit, Image |
+| REQ-DEV-004 | A plugin repo's tracked assets **MUST** be limited to: plugin source, the per-plugin seam files, the thin caller workflow, the shared AI-code-review guide, the minimal Claude integration, and the devkit submodule. | DEC-003, DEC-015 | Repo |
+| REQ-DEV-005 | The bootstrap/sync mechanism **MUST** generate only **Claude** IDE integration. Antigravity and Copilot generation **MUST NOT** be produced for plugin repos. | DEC-016 | Devkit, Makefile |
+| REQ-DEV-006 | A single shared **AI-code-review guide** **MUST** be vendored into every plugin repo so AI-driven review is consistent org-wide. | DEC-017 | Devkit, Repo |
+| REQ-DEV-007 | The rootless-nested-podman model **MUST** pass a feasibility spike (Appendix E.6 acceptance) on the target CI runner **before** Phase-1 rollout; a self-hosted-runner fallback **MUST** be documented if GH-hosted runners cannot satisfy it. | DEC-031, DEC-032 | Process, Image |
+| REQ-CONF-001 | The devkit **MUST** provide a `conformance` check (run in each repo's PR gate) asserting the repo exposes the frozen Appendix E.1 targets and matches the Appendix E.5 asset list. | DEC-037 | Devkit, Makefile |
+
+### 5.2 CI interface (CI)
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-CI-001 | The devkit **MUST** publish a reusable **resync** workflow (`workflow_call`), runnable nightly and via `workflow_dispatch`, that updates the vendored submodule and opens an auto-merge PR. | DEC-002 | Workflow |
+| REQ-CI-002 | The devkit **MUST** publish a reusable **branch/PR e2e** workflow (`workflow_call`) that runs the full plugin lifecycle self-contained against a booted A0 instance. | DEC-002, DEC-004 | Workflow |
+| REQ-CI-003 | The e2e workflow **MUST** report `install`, `verify-installed`, `uninstall`, and `verify-uninstalled` as **individually-legible stages** per config-case within a single A0 boot. | DEC-004, DEC-033 | Workflow |
+| REQ-CI-007 | The e2e workflow **MUST** trigger on PR → `main`, `workflow_dispatch`, and a nightly schedule (upstream `latest`); feature-branch pushes are not a default trigger. | DEC-021 | Workflow |
+| REQ-CI-004 | The reusable e2e workflow body **MUST** live in the **devkit** repo; plugin repos carry only a thin caller (`uses: …@<ref>`) rendered by bootstrap and kept fresh by the resync mechanism. | DEC-002, DEC-020 | Workflow |
+| REQ-CI-005 | The A0 image under test **MUST** be a parameter, defaulting to upstream `agent0ai/agent-zero` and overridable (per-plugin / workflow input) to the operator-fork image. | DEC-019 | Workflow, Devkit |
+| REQ-CI-006 | CI **MUST** run the lifecycle **inside the devkit devcontainer**, booting A0 as a nested unprivileged container — no `--privileged`, no host Docker socket mount. | DEC-018 | Workflow, Image |
+
+### 5.3 Common Makefile contract (MK)
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-MK-001 | Every plugin repo **MUST** expose the frozen common Make target set defined in Appendix E.1, with identical names and contracts across all repos. | DEC-005, DEC-006, DEC-008 | Makefile |
+| REQ-MK-002 | The skeleton of every common target **MUST** be supplied by the devkit (via an included Makefile fragment); a plugin repo **MUST** override only the designated hook targets. | DEC-003, DEC-005 | Makefile |
+| REQ-MK-003 | Hook targets **MUST** be language-agnostic: a plugin **MAY** implement them with Playwright, container exec/SSH, API calls, scripts, or any combination. | DEC-005 | Makefile |
+
+### 5.4 Lifecycle & config-matrix (LC)
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-LC-001 | The harness **MUST** support a plugin-declared set of configurations exercised **serially** within one A0 boot, each via an `install(config) → verify-installed → uninstall → verify-uninstalled` cycle. | DEC-006, DEC-012 | Devkit |
+| REQ-LC-002 | Configurations **MUST** be declared in a single declarative cases manifest (`tests/e2e/cases.yaml`, shape per Appendix E.2); the devkit **MUST** drive the loop. A plugin with no manifest is treated as one default case. | DEC-012 | Devkit |
+| REQ-LC-003 | Per-case configuration **MUST** be applied after install via the A0 plugin config API (not via boot-time seeding), since all cases share one boot. | DEC-012 | Devkit |
+| REQ-LC-004 | The common lifecycle interface targets `install`, `enable`, `disable`, `uninstall` (aliases `delete`/`remove`), `up`, `down` **MUST** be generic and supplied by the devkit; a plugin **MUST NOT** reimplement them. `enable`/`disable` are hook-callable primitives, not mandatory loop stages. | DEC-008, DEC-010, DEC-036 | Devkit, Makefile |
+| REQ-LC-005 | On a stage failure mid-matrix, the harness **MUST** record which case+stage failed, attempt teardown toward baseline, and report it; remaining cases default to **fail-fast** (skipped) unless the run is configured to continue. | DEC-024 | Devkit |
+| REQ-LC-006 | A case **MAY** declare `requires_reboot: true`; the harness **MUST** then restart the A0 container before applying that case's config (for boot-only settings — Appendix F.4). | DEC-028 | Devkit |
+
+### 5.5 Assertion targets (VER) — verify-installed / verify-uninstalled
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-VER-001 | `verify-installed` **MUST** run, in series: (a) the **common** install-effectiveness checks, then (b) a **per-plugin hook**. A green `verify-installed` means both passed. | DEC-009, DEC-011 | Devkit + seam |
+| REQ-VER-002 | The common checks of `verify-installed` **MUST** include: (1) every dependency the plugin **declares** (manifest shape mirrors the infra env-descriptor, Appendix E.3) is present in the running container, and (2) the plugin's files are unzipped/landed per its expected directory structure. This logic lives once in the devkit and **MUST NOT** be reimplemented per plugin. | DEC-011 | Devkit |
+| REQ-VER-003 | The per-plugin hook of `verify-installed` **MUST** be language-agnostic (Playwright, container exec/SSH, API calls, scripts) and is the plugin's functional assertion for the active case. | DEC-005, DEC-009 | Seam |
+| REQ-VER-006 | Hooks **MUST** conform to the ABI in Appendix E.4: fixed executable paths, pass/fail by exit code, and the fixed env-var context the devkit injects. A missing hook is a no-op pass. | DEC-026 | Devkit, Seam |
+| REQ-VER-004 | `verify-uninstalled` **MUST** run, in series: (a) the **common** residue scan via snapshot+diff of all four layers — plugin-dir filesystem, `pip freeze`, settings.json keys, `plugins_list` API — against a pre-install baseline, then (b) an optional **per-plugin hook**. | DEC-009, DEC-022 | Devkit + seam |
+| REQ-VER-005 | Any residue detected by `verify-uninstalled` **MUST** fail the build and be reported as a plugin **defect** — residue is a bug in the plugin's uninstall path, not a condition to silently clean. | DEC-007, DEC-009 | Devkit |
+
+### 5.6 Rollout & governance (ROL)
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-ROL-001 | Rollout **MUST** proceed in phases — devkit, then template + a reference plugin, then fan-out — with each phase validated before the next. | DEC-024 | Process |
+| REQ-ROL-002 | Conformance **MUST** be enforced by each plugin repo's PR gate. The `agent-zero-vendor-plugins` gate **MUST NOT** be extended with e2e and retains its existing static checks. | DEC-023 | Workflow, Gate |
+| REQ-ROL-003 | During fan-out, each migrated repo **MUST** drop the full skills-lib vendoring in favour of the devkit-only surface (REQ-DEV-002). | DEC-015, DEC-024 | Repo |
+| REQ-ROL-004 | The canonical SPEC **MUST** reside at `agent-zero-plugin-development-testkit/SPEC.md`. | DEC-025 | Doc |
+
+### 5.7 Knowledge capture & canonical home (GOV) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-GOV-001 | The SPEC and all its review documents **MUST** be committed at the devkit repo root (`SPEC.md`, `SPEC-REVIEW-NNN.md`); the workshop copy is non-canonical and **MUST NOT** be the system of record. | DEC-025, DEC-045 | Doc |
+| REQ-GOV-002 | Durable operational knowledge an implementer needs (verified A0 runtime quirks, harness gotchas, fan-out classification) **MUST** be captured in committed devkit docs (Appendix F + `docs/`) and **MUST NOT** live only in assistant memory. | DEC-045 | Doc |
+| REQ-GOV-003 | Every binding standard introduced by this SPEC **MUST** be machine-checkable by `make conformance` or the e2e gate; a standard that can only be eyeballed is non-normative. | DEC-045 | Devkit |
+
+### 5.8 Vendored authoring skills & Claude guidelines (SKL) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-SKL-001 | The devkit **MUST** vendor the curated plugin-authoring skill set (Appendix E.7) sourced from `agent-zero-plugins-skills`, and **MUST** keep it current via the sync mechanism. | DEC-046 | Devkit |
+| REQ-SKL-002 | Every plugin repo's `CLAUDE.md` **MUST** contain the shared common-guidelines block (identical org-wide, marker-delimited so sync can replace it) and **MAY** add a repo-specific section outside the markers. | DEC-046 | Repo, Devkit |
+| REQ-SKL-003 | The vendored skills and the common `CLAUDE.md` block **MUST** be distributed/refreshed by the devkit-sync mechanism, not hand-copied. | DEC-046, DEC-044 | Workflow |
+
+### 5.9 Documentation: README & developer guide (DOC) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-DOC-001 | Every plugin repo **MUST** ship a `DEVELOPING.md` rendered from the devkit template, documenting the devcontainer and the standard local dev/test loop (`build → up → e2e → doctor → verify → down`). | DEC-047 | Repo, Devkit |
+| REQ-DOC-002 | Every plugin repo's `README.md` **MUST** follow the standard skeleton (Appendix E.8): title + thumbnail, one-line description, **Why**, install/behaviour media, configuration, inter-plugin dependencies, A0 compatibility, doctor, license. Content is plugin-specific; the skeleton is fixed. | DEC-048 | Repo |
+| REQ-DOC-003 | A plugin's README **MUST** embed the harness-captured install/behaviour media (§5.11) as its primary visual, referenced from the committed known path. | DEC-048, DEC-051 | Repo |
+| REQ-DOC-004 | Every plugin **MUST** declare its A0 compatibility as `a0_compat: upstream \| fork-required` (in `.devkit.yml`); `fork-required` **MUST** name the required fork change and link the fork repo, and **MUST** be consistent with the A0 image its e2e passes against. | DEC-049 | Repo, Doc |
+| REQ-DOC-005 | Every plugin's `plugin.yaml` **MUST** carry a human-readable `description`, and the card **MUST** ship a real (non-placeholder) `webui/thumbnail.*`. | DEC-048, DEC-051 | Repo |
+
+### 5.10 Licensing (LIC) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-LIC-001 | Every first-party plugin repo **MUST** contain a root `LICENSE` (Apache-2.0) and a matching `plugin.yaml` `license: Apache-2.0`. | DEC-050 | Repo |
+| REQ-LIC-002 | A fork plugin **MUST** retain its upstream license and declare it in `plugin.yaml`; the Apache-2.0 mandate **MUST NOT** override an upstream license. | DEC-050, DEC-043 | Repo |
+
+### 5.11 Behaviour media capture (MED) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-MED-001 | The devkit lifecycle harness **MUST** capture media during the e2e run — at minimum a screenshot of the installed plugin card/config screen and a short GIF (or video) of the plugin's documented behaviour — emitted as CI artifacts. | DEC-051 | Devkit |
+| REQ-MED-002 | The captured media **MUST** be written to a known committed path (`docs/media/`) and be the assets the README embeds; an author **MAY** override a specific asset but the default is the auto-captured one. | DEC-051 | Repo, Devkit |
+| REQ-MED-003 | The behaviour GIF/video **MUST** be produced by driving the plugin's behaviour verify (§5.13), so the documented behaviour is the verified behaviour. | DEC-051, DEC-053 | Devkit |
+
+### 5.12 Doctor health command (DR) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-DR-001 | Every plugin **MUST** ship a doctor script at the known path `usr/plugins/<name>/scripts/doctor.py` (or the `plugin_dir` equivalent for forks/build-generated), exiting `0` iff healthy, that checks: declared dependencies importable, config present + schema-valid, and the plugin's extension points mounted. | DEC-052 | Repo |
+| REQ-DR-002 | `doctor` **MUST** be runnable inside a booted A0 (`python /a0/usr/plugins/<name>/scripts/doctor.py`) and **MUST** print a per-check PASS/FAIL summary; soft warnings exit `0`, hard failures exit non-zero. | DEC-052 | Repo |
+| REQ-DR-003 | The e2e **MUST** run `doctor` against the installed plugin and assert it reports healthy, wiring the doctor into the PR gate. | DEC-052 | Devkit, Workflow |
+
+### 5.13 Behaviour-level verification (BEH) — Cycle 2
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-BEH-001 | Every plugin **MUST** supply a behaviour verify that exercises the plugin's **running behaviour** in the booted dev A0 (driving the UI/API of the live instance), distinct from implementation/unit tests. It is expressed as the `verify-installed` hook (Appendix E.4) performing real behavioural assertions, not mere file/dep presence. | DEC-053 | Repo |
+| REQ-BEH-002 | The behaviour verify **MUST** run in the branch/PR e2e gate (one nested-A0 boot) and gate merge; the generic install/uninstall lifecycle is necessary but **MUST NOT** be the only behavioural check. | DEC-053 | Workflow |
+| REQ-BEH-003 | The behaviour verify **SHOULD** be the same flow the media capture (§5.11) records, so a green behaviour check and the README GIF are the same evidence. | DEC-053, DEC-051 | Repo, Devkit |
+
+---
+
+## 6. Verification
+
+_(One row per REQ, added in lockstep.)_
+
+| ID | Method | Acceptance |
+|---|---|---|
+| REQ-DEV-001 | Inspection | No plugin repo contains harness/Playwright/orchestration code or a devcontainer def outside the vendored devkit; grep across repos returns none. |
+| REQ-DEV-002 | Inspection | Each repo vendors only the devkit submodule; no `.skills` full-library submodule; tracked copied files are minimal vs submodule references. |
+| REQ-DEV-003 | Demonstration | The published devcontainer image boots an A0 container nested + rootless (no `--privileged`); the same image runs a lifecycle in CI and on a developer/AI machine. |
+| REQ-DEV-004 | Inspection | A repo's tracked files match the allowed-asset list; CI flags any out-of-contract tracked file. |
+| REQ-DEV-005 | Inspection | Generated IDE integration is Claude-only; no `.antigravity`/Copilot artifacts are produced. |
+| REQ-DEV-006 | Inspection | Every plugin repo contains the identical vendored AI-code-review guide. |
+| REQ-DEV-007 | Demonstration | The Phase-0 spike boots A0 rootless+nested on the chosen runner and passes Appendix E.6's acceptance test; the fallback is documented. |
+| REQ-CONF-001 | Demonstration | `make conformance` passes on a conforming repo and fails on a repo missing a target or carrying an out-of-list asset. |
+| REQ-CI-001 | Demonstration | Triggering the resync mechanism updates the devkit submodule pin and opens an auto-merge PR. |
+| REQ-CI-002 | Demonstration | A PR in a conforming repo runs the full lifecycle to green with no repo-local harness code. |
+| REQ-CI-003 | Inspection | CI run shows install / verify-installed / uninstall / verify-uninstalled as separate, named, individually pass/fail steps under one boot. |
+| REQ-CI-007 | Inspection | The workflow's `on:` block lists pull_request→main, workflow_dispatch, and schedule; no feature-branch push trigger. |
+| REQ-CI-004 | Inspection | The e2e workflow body exists only in the devkit; plugin repos hold a thin `uses:@<ref>` caller. |
+| REQ-CI-005 | Demonstration | The same plugin's e2e runs against both the default upstream image and an overridden fork image via parameter. |
+| REQ-CI-006 | Inspection | The CI job runs inside the devcontainer and boots A0 nested with no privileged flag / no docker.sock mount. |
+| REQ-MK-001 | Inspection | `make help` in every repo lists the identical common target set with identical contracts. |
+| REQ-MK-002 | Inspection | Removing the included devkit fragment breaks the common targets; only hook targets differ between repos. |
+| REQ-MK-003 | Demonstration | A reference plugin implements a hook target via container-exec (non-Playwright) and passes CI. |
+| REQ-LC-001 | Demonstration | A plugin declaring ≥2 cases runs N serial install→verify-installed→uninstall→verify-uninstalled cycles in one boot; CI shows each cycle. |
+| REQ-LC-002 | Inspection | `cases.yaml` drives the loop; a plugin without one runs exactly one default case. |
+| REQ-LC-003 | Demonstration | Two cases producing observably different installed state both verify correctly within one boot. |
+| REQ-LC-004 | Inspection | `install/enable/disable/uninstall/up/down` are identical across repos and sourced from the devkit fragment. |
+| REQ-LC-005 | Demonstration | A deliberately-failing case reports its case+stage, tears down, and (default) skips remaining cases. |
+| REQ-LC-006 | Demonstration | A `requires_reboot: true` case restarts the A0 container and verifies a boot-only setting takes effect. |
+| REQ-VER-001 | Demonstration | Breaking only the per-plugin hook fails verify-installed at stage (b); breaking a declared dep fails at stage (a). |
+| REQ-VER-002 | Demonstration | After the hook exercises the plugin, each declared distribution resolves via importlib.metadata; a removed/misnamed declared dist fails with a specific message. Pip-name≠import-name cases (e.g. PyYAML→yaml) pass. |
+| REQ-VER-003 | Demonstration | A reference plugin implements its verify-installed hook via container-exec (non-Playwright) and passes. |
+| REQ-VER-006 | Inspection/Demonstration | A hook returning non-zero fails its stage; a hook receives the documented env-var context; an absent hook is a no-op pass. |
+| REQ-VER-004 | Demonstration | After uninstall, an injected residue in any layer is caught; the plugin's OWN declared deps persisting (expected per F.1) do NOT trip the scan; ambient A0 drift does not false-fail. |
+| REQ-VER-005 | Demonstration | A plugin whose uninstall hook leaves residue fails CI with a defect-labelled verify-uninstalled report. |
+| REQ-ROL-001 | Inspection | Rollout history shows devkit → template+livekit → fan-out ordering; no batch migration precedes a green reference. |
+| REQ-ROL-002 | Inspection | Each plugin repo has the e2e PR gate; the vendor-plugins publish workflow is unchanged (no e2e step added). |
+| REQ-ROL-003 | Inspection | A migrated repo no longer vendors the full skills lib; only the devkit submodule remains. |
+| REQ-ROL-004 | Inspection | `SPEC.md` exists at the devkit repo root. |
+| REQ-GOV-001 | Inspection | `SPEC.md` + `SPEC-REVIEW-*.md` exist at the devkit root; no canonical copy remains only in the workshop. |
+| REQ-GOV-002 | Inspection | Appendix F + `docs/` capture the A0 quirks/gotchas an implementer needs; none are flagged "memory-only". |
+| REQ-GOV-003 | Demonstration | Each new binding REQ maps to a `make conformance` assertion or an e2e gate step. |
+| REQ-SKL-001 | Inspection | The devkit `skills/` tree contains the Appendix E.7 set; sync refreshes them. |
+| REQ-SKL-002 | Inspection | Every repo's `CLAUDE.md` carries the marker-delimited common block byte-identical org-wide; repo-specific content sits outside the markers. |
+| REQ-SKL-003 | Demonstration | Running devkit-sync updates the vendored skills + the common CLAUDE block in a consumer via PR. |
+| REQ-DOC-001 | Inspection | Every repo has `DEVELOPING.md` matching the devkit template's common sections. |
+| REQ-DOC-002 | Inspection | Every README contains the Appendix E.8 headings in order; `make conformance` flags a missing section. |
+| REQ-DOC-003 | Inspection | The README references the committed media at the known path; the asset exists. |
+| REQ-DOC-004 | Inspection | Every plugin declares `a0_compat`; `fork-required` entries link the fork repo and name the change; value matches the e2e image. |
+| REQ-DOC-005 | Inspection | `plugin.yaml` has a non-empty `description`; the thumbnail is not the placeholder stub (size/dimension check). |
+| REQ-LIC-001 | Inspection | Every first-party repo has Apache-2.0 `LICENSE` + matching `plugin.yaml license`. |
+| REQ-LIC-002 | Inspection | Fork repos retain + declare their upstream license; none are force-relicensed. |
+| REQ-MED-001 | Demonstration | An e2e run emits the screenshot + behaviour GIF/video artifacts. |
+| REQ-MED-002 | Inspection | The README media path holds the harness-captured assets; overrides are explicit. |
+| REQ-MED-003 | Demonstration | The captured GIF is produced by running the behaviour verify; disabling the verify removes the GIF. |
+| REQ-DR-001 | Demonstration | `doctor.py` exists at the known path; it fails when a declared dep is removed or config is invalid, and passes when healthy. |
+| REQ-DR-002 | Demonstration | Running `doctor.py` inside booted A0 prints per-check PASS/FAIL with the documented exit codes. |
+| REQ-DR-003 | Demonstration | The e2e runs doctor post-install and fails the gate when doctor reports unhealthy. |
+| REQ-BEH-001 | Demonstration | The `verify-installed` hook drives real plugin behaviour in nested A0; stubbing the behaviour (not the files) fails it. |
+| REQ-BEH-002 | Inspection | The PR e2e includes the behaviour verify as a gating step. |
+| REQ-BEH-003 | Inspection | The media-capture flow and the behaviour verify reference the same scripted flow. |
+
+---
+
+## Appendix A — Decisions log
+
+_(DEC-NNN entries written immediately as each decision is made.)_
+
+**DEC-001 — Devkit is a vendored library, not a container image.**
+⚠️ **SUPERSEDED by DEC-018.** _Original: the devkit stays a vendored submodule and there
+is no bespoke devkit image, only the A0 image under compose. Rationale at the time: an
+image adds maintenance for no capability the compose+library model lacks. DEC-018 reverses
+the conclusion — a devcontainer image provides a capability the host-compose model lacks:
+one portable execution environment shared by CI, developers, and AI agents, with rootless
+nested containers. The submodule-vendoring half of DEC-001 survives (see DEC-015)._
+_Closed Q-001._
+
+**DEC-002 — Two reusable workflow families.** The devkit publishes (a) a **resync**
+workflow that keeps the vendored submodule current (nightly + on-demand) and opens an
+auto-merge PR, and (b) a **branch/PR e2e** workflow that runs the full lifecycle
+self-contained. Both are distributed by the same mechanism the org already uses for
+shared workflows (caller-template copy + `make link-workflows`), mirroring the **skills
+vendoring system**. _Augments DEC-001._
+
+**DEC-003 — Repos hold only the absolute minimum.** Everything common lives in the
+devkit. A plugin repo tracks only: plugin source, its seam files, thin caller workflows,
+and the vendoring submodule + generated symlinks. _Refines DEC-002._
+
+**DEC-004 — CI granularity: distinct stages, one boot.** install / effectiveness-check /
+verify / remove / purge run as separate, individually-reported stages against a single
+booted A0 instance. _Closes Q-002._
+
+**DEC-005 — Seams are language-agnostic Make targets (template-method hook methods).**
+The plugin overrides hook targets (`verify`, and others per DEC-006); each may be
+implemented with Playwright, container exec/SSH, API calls, or scripts. The devkit owns
+the skeleton (boot, login, generic install/uninstall mechanics, orchestration, residue
+scan). _Closes Q-003. Supersedes the earlier "verify-only seam" framing — there are
+several hook methods._
+
+**DEC-006 — The lifecycle is a serial config-matrix, richer than three operations.**
+A plugin declares ≥1 configuration. For each configuration the harness runs
+`install(config) → effectiveness-check → verify → remove`, serially, within one boot.
+After the last configuration, a final cleanup pass runs `purge`. The operations:
+- `install(config)` — generic zip install + plugin-supplied per-config settings.
+- **effectiveness-check** — confirms the install materially took effect (packages
+  present, config landed, routes/extensions registered). _Provisional name; the user
+  referred to it as `docker` — final name pending Q-012._
+- `verify` — plugin-specific functional assertion for the active config.
+- `remove` — uninstall, enabling reinstall with the next config.
+- `purge` — final residue assertion (see DEC-007).
+_Augments DEC-005._
+
+**DEC-007 — Residue is a flagged defect, not silent cleanup.** `purge` exists to prove
+a clean uninstall. If it finds any leftover (disk / API / UI / pip deps / settings), it
+fails the build and reports the leftover as a plugin defect — because a conforming
+plugin's uninstall path should have removed it. _Augments DEC-006. Realised by
+`verify-uninstalled` per DEC-009._
+
+**DEC-008 — Frozen common target vocabulary.** The target set is frozen as Appendix E.1:
+artifact (`build`, `package`); generic lifecycle interface (`up`, `down`,
+`install`, `enable`, `disable`, `uninstall` — aliases `delete`/`remove`, `e2e`/`ci`);
+assertions (`verify-installed`, `verify-uninstalled`); plus the unchanged skills-linking
+targets. `uninstall`, `delete`, `remove` are one operation. _Refines DEC-005._
+
+**DEC-009 — No standalone `purge` / `verify`; two assertion targets instead.** The
+effectiveness check, the functional verify, and the residue check collapse into two
+targets, each `common-checks → per-plugin-hook` run in series:
+- `verify-installed` — common install-effectiveness + per-plugin functional hook.
+- `verify-uninstalled` — common residue scan + optional per-plugin residue hook.
+The user's "doctor" diagnostic is realised as the common stage of `verify-installed`.
+_Supersedes the standalone `purge` and standalone functional `verify` from DEC-006._
+
+**DEC-010 — `enable` / `disable` are first-class lifecycle targets.** They are part of
+A0's common plugin interface (toggle), so the devkit exposes them generically. The
+default lifecycle installs enabled; plugins that need to exercise enable/disable
+transitions do so from their `verify-installed` hook. _Augments DEC-008._
+
+**DEC-011 — `verify-installed` common stage = declared-deps check + unzip-structure
+check.** Two deterministic, devkit-owned checks run before the per-plugin hook:
+1. **Declared dependencies present** — the plugin declares its dependencies in its
+   manifest using the *same shape/options as the infra env-descriptor* (Appendix E.3);
+   the devkit checks each is actually installed in the running container.
+2. **Unzip/structure landed** — the plugin's files are present at their expected paths
+   after install. Common logic; never reimplemented per plugin.
+_Augments DEC-009._
+
+**DEC-012 — Config-matrix via declarative `cases.yaml`.** A plugin declares its serial
+configuration cases in `tests/e2e/cases.yaml` (Appendix E.2): a list of `{name, config}`
+entries. The devkit loops over them in one boot, applying each case's `config` after
+install via the A0 plugin config API. No `cases.yaml` ⇒ one default (empty-config) case.
+_Closes Q-013, Q-014._
+
+**DEC-013 — `verify-installed` common checks reuse existing declarations; no new
+dependency schema.** The two common checks read what plugins already ship:
+1. **Deps present** — every package in the plugin's `requirements.txt` is importable in
+   the running container (this is the canonical pip declaration; A0's `hooks.py` installs
+   it on enable). Each operator-config/secret env var declared in `meta.yaml` `env[]`
+   (`kind: config|secret`) is present in the container environment.
+2. **Structure landed** — the file set is derived **automatically from the packaged
+   zip**; the devkit asserts those paths exist under `/a0/usr/plugins/<name>/`. No
+   plugin-authored structure manifest.
+_Closes Q-016, Q-018. Refines DEC-011 (supersedes the placeholder `dependencies:` block
+in Appendix E.3 — reuse `requirements.txt` + `meta.yaml` instead)._
+
+**DEC-014 — `verify-uninstalled` cadence + baseline.** `verify-uninstalled` runs after
+**every** `uninstall` in the matrix loop (cheap per-case residue insurance) and is the
+final action. The residue baseline is a **pre-install snapshot** of the relevant surfaces
+(plugin dir, pip freeze, settings keys, plugin API list); after uninstall the harness
+asserts return-to-baseline. `cases.yaml` MAY override expectations per case. Exact
+per-surface snapshot/diff mechanism is Cluster 4. _Closes Q-017._
+
+**DEC-015 — Vendor ONLY the devkit, minimally; reuse the skills bootstrap mechanism.**
+Plugin repos stop vendoring the full skills library (too broad a context for plugin work).
+They vendor **only the devkit** as a git submodule. The skills repo's bootstrap + sync
+*mechanism* is **ported into the devkit** so the devkit can (a) bootstrap itself into a
+new plugin repo and (b) render the first version of the pipelines — but the vendored
+surface is kept to the **minimum**, preferring **submodule references over copied files**.
+_Refines DEC-002, DEC-003; keeps the submodule half of DEC-001._
+
+**DEC-016 — Claude-only IDE integration.** The ported mechanism drops Antigravity and
+Copilot generation (they add noise). Only Claude integration is actively supported and
+kept minimal. Other link targets MAY remain wired but unused. _Augments DEC-015._
+
+**DEC-017 — Vendor a shared AI-code-review setup (Claude-native).** Every plugin repo
+gets a thin `claude-code-review.yml` workflow using `anthropics/claude-code-action@beta`
+routed to the `/code-review` plugin (`code-review@claude-code-plugins`), fork-safe via
+`pull_request_target`, authed with the org `CLAUDE_CODE_OAUTH_TOKEN` secret — the existing
+ecosystem standard (canonical: gitnexus). A shared review rubric is vendored alongside so
+local (agent-driven) and CI reviews share one standard. No CodeRabbit; Gemini is legacy.
+_Closes Q-022. Augments DEC-015._
+
+**DEC-021 — e2e triggers.** The e2e workflow runs on: PR → `main` (the merge gate),
+`workflow_dispatch` (manual re-runs, e.g. against a new A0 image), and a nightly schedule
+against upstream `latest` (drift-catch). Pushes to feature branches are NOT a default
+trigger (developers/AI run the lifecycle locally in the devcontainer instead — DEC-018).
+_Closes Q-020._
+
+**DEC-022 — Residue detection is snapshot + diff across all four layers.**
+`verify-uninstalled`'s common stage snapshots, before install: (1) the plugin-dir
+filesystem listing, (2) `pip freeze`, (3) settings.json keys, (4) the `plugins_list` API.
+After each uninstall it asserts exact return-to-baseline on all four; any delta is residue
+⇒ fail-as-defect (DEC-007). The per-plugin residue hook (DEC-009 stage b) remains
+**optional**. _Closes Q-009. Refines DEC-014._
+
+**DEC-023 — Conformance is enforced per-repo only; the gate is unchanged.** Each plugin
+repo's PR gate runs the full e2e and is the enforcement point. The
+`agent-zero-vendor-plugins` gate keeps its current static checks (zip sanity, secrets
+hygiene, meta sync) and is **not** extended with e2e. _Closes Q-010._
+
+**DEC-024 — Phased rollout: devkit → reference → fan-out.** (1) Build the devkit
+(devcontainer image + reusable e2e workflow + ported Claude-only bootstrap). (2) Prove
+it end-to-end on the template + `livekit` (existing adopter). (3) Fan out to the other
+~18 repos via the bootstrap/resync mechanism, de-vendoring the full skills lib down to
+the devkit-only surface per repo, adding `cases.yaml` + verify hooks. Each phase validates
+before the next. _Closes Q-024._
+
+**DEC-025 — SPEC canonical home is the devkit repo.** This SPEC lives at
+`agent-zero-plugin-development-testkit/SPEC.md` — with the component that implements the
+contract. _Closes Q-011._
+
+---
+
+### Post-review closures (SPEC-REVIEW-001)
+
+**DEC-026 — Hook-target ABI is pinned (Appendix E.4).** A per-plugin hook is an
+executable at a fixed path (`tests/e2e/hooks/verify-installed`,
+`tests/e2e/hooks/verify-uninstalled`); the common target invokes it. **Pass/fail = exit
+code** (0 = pass). The devkit passes a **fixed env-var context** (`A0_BASE_URL`,
+`A0_USERNAME`, `A0_PASSWORD`, `A0_CONTAINER`, `PLUGIN_NAME`, `CASE_NAME`,
+`CASE_CONFIG_JSON`, `A0_REPORT_DIR`). A missing hook ⇒ that stage is a no-op pass.
+_Closes Critical-1. Augments DEC-005/009._
+
+**DEC-027 — Dep check matches A0's lazy-install reality (Appendix F.2).** A0 installs
+plugin deps **lazily at first use**, not on install, and never uninstalls them. So the
+common dep check (a) parses `requirements.txt` to **distribution** names (handling
+specifiers/extras/markers/URL/`-r` includes), and (b) asserts each declared distribution
+**resolves via `importlib.metadata` after the verify-installed hook has exercised the
+plugin** (which triggers lazy install). Functional `import` correctness stays in the
+per-plugin hook. _Closes Critical-3._
+
+**DEC-028 — Single-boot config-matrix is valid for `config.json`; boot-only config uses
+a restart flag.** A0 reads `config.json` **live per-operation** (Appendix F.3), so
+post-install API config application within one boot is correct for the common case. For
+the narrow **boot-only** class (env-var-derived settings, MCP settings — Appendix F.4), a
+case MAY set `requires_reboot: true` (Appendix E.2), instructing the harness to restart
+the A0 container for that case. _Closes Critical-2. Refines DEC-012._
+
+**DEC-029 — Residue scan is scoped to plugin-attributable, undeclared deltas.** Because
+A0 does not uninstall deps (Appendix F.1), the `pip freeze` layer asserts **no
+*undeclared* package leaked** and **excludes the plugin's own `requirements.txt`
+distributions** (their persistence is expected A0 behaviour, not a plugin defect). The
+fs/settings/API layers diff only **plugin-attributable** keys/paths/entries, not ambient
+A0 drift. _Closes Major-4. Refines DEC-022._
+
+**DEC-030 — `meta.yaml env[]` presence check splits by kind.** `kind: config` ⇒ env var
+MUST be **set and non-empty**. `kind: secret` ⇒ only **declaration-wiring** is checked
+(the var is wired into the container env; a placeholder value is acceptable), since real
+secrets are absent in e2e. The devkit provides a **secret-stub injection** path for CI.
+_Closes Critical-5. Refines DEC-013._
+
+**DEC-031 — Devcontainer feasibility is a Phase-0 gate.** The rootless-nested-podman
+model (DEC-018) MUST be proven by a feasibility spike (Q-021) **before Phase 1 of rollout**
+(DEC-024): boot an A0 container rootless+unprivileged inside the devcontainer on
+GH-hosted `ubuntu-latest`, with an explicit acceptance test. If GH-hosted runners can't
+do it (e.g. missing `/dev/fuse`, subuid/subgid), a **self-hosted-runner fallback** is the
+documented alternative. The contract clauses stay normative MUST; the *mechanism* is
+proven first. _Closes Critical-4._
+
+> **✅ PHASE-0 PASSED on GH-hosted `ubuntu-latest` (2026-06-20, run `ee1a4fb`).** The
+> `devcontainer-spike` workflow built the devcontainer, ran a nested rootless container,
+> **booted the real `agent0ai/agent-zero:latest` image nested + unprivileged**, hit
+> `/login` healthy, and established an authenticated session — `PHASE-0 ACCEPTANCE PASSED`.
+> The DEC-018 devcontainer model is no longer an assumption. Findings hardened along the
+> way: DEC-039 (base image), DEC-040 (sshd self-destruct), DEC-041 (port-80 bind). The
+> self-hosted-runner fallback is therefore **not needed**. Phase 1 is unblocked.
+>
+> **Empirical update (2026-06-19):** the core mechanism is **proven on a real Linux host**.
+> Rootless podman-in-podman ran with **no `--privileged`** — flags
+> `--device /dev/fuse --security-opt label=disable`, nested container pulled+ran. Prereqs
+> present: `/dev/fuse`, subuid/subgid for the run user, `fuse-overlayfs`, `newuidmap`,
+> userns enabled. **Spike finding → DEC-039.** Remaining Phase-0 work is the **full**
+> Appendix E.6 acceptance (boot the actual A0 image nested) on **GH-hosted `ubuntu-latest`**
+> — authored as the `devcontainer-spike` workflow (PR #8) so the real runner is the proof.
+
+**DEC-044 — Devkit is the SOLE vendored submodule in plugin repos; the skills-sync
+*mechanism* is copied into the devkit. (Supersedes the `.skills`-mediated vendoring in
+DEC-015/DEC-002.)** Plugin repos vendor **only** the devkit
+(`agent-zero-plugin-development-testkit`), as a **direct** submodule at `tests/_testkit` —
+NOT transitively via a `.skills` submodule. The full skills library is too wide/specific
+for plugin work, and the devkit is self-contained (intended to open-source alongside the
+plugins). Plugin repos therefore **remove `.skills` and the `skills-sync` workflow**.
+The skills-sync *distribution mechanism* (genuinely useful) is **ported into the devkit**
+as **`devkit-sync`**: a reusable `workflow_call` sync workflow + a caller-template + `link-*`
+Makefile targets + GitHub-App auth (the same App, already installed on the devkit repo). It
+keeps each consumer's devkit submodule current and renders the e2e caller workflow, opening
+auto-merge PRs — exactly like skills-sync, but devkit-scoped. _Earlier PR #15 (bumping the
+devkit *inside* `.skills`) was closed as the abandoned path._
+
+**DEC-042 — Canonical plugin-repo layout.** A standardized plugin repo places the plugin
+source — the exact install payload — at **`usr/plugins/<name>/`** (mirrors the A0 runtime
+path `/a0/usr/plugins/<name>/`, so repo layout == deployed layout and packaging is "zip the
+contents of `usr/plugins/<name>/`"). Plus the standardization wrapper: `tests/e2e/hooks/`
+(the seam), `tests/_testkit` (symlink → vendored devkit), `.skills` (submodule),
+`.github/workflows/` (caller workflows), `Makefile` (`-include` the devkit fragment).
+First-party plugins migrate to this; the template (`agent-zero-new-plugin-template`) moves
+`my_plugin/` → `usr/plugins/<name>/`. _Resolves the divergent-layout problem (livekit
+`usr/plugins/livekit/`, gitnexus `dist/gitnexus/`, mermaid `mermaid_diagrams/`, root, …)._
+
+**DEC-043 — Forked plugins keep upstream layout via a declared `.devkit.yml`.** A plugin
+that is a fork the operator keeps **upstreaming changes to** MUST NOT be forced to DEC-042's
+layout (it would diverge from upstream and break PR round-tripping). Instead the fork adds a
+repo-local `.devkit.yml` declaring `plugin_dir:` (where upstream keeps the source) and
+optional `display_name:`. The plugin source stays put; the fork only *adds* the
+standardization wrapper (which doesn't collide with upstream merges). **plugin_dir resolution
+(harness + Makefile + reusable workflow):** `.devkit.yml` `plugin_dir` → else canonical
+`usr/plugins/<name>`. This is a first-class escape hatch, not a workaround. The SAME escape
+hatch serves **build-generated** plugins whose manifest is produced into a build dir (e.g.
+gitnexus → `dist/gitnexus/`), even when first-party. _Fan-out has two tracks: **reshape**
+(first-party → DEC-042) and **declare** (forks + build-generated → `.devkit.yml`)._
+
+> **Classification (confirmed by operator 2026-06-20):**
+> - **Declare `.devkit.yml`** (keep layout): forks `commands`, `phantom-bridge`,
+>   `ask-user-question`; build-generated `gitnexus` (`dist/gitnexus`).
+> - **Reshape → `usr/plugins/<name>/`** (first-party): `livekit` (already there),
+>   `mermaid-diagrams`, `browser-interactive`, `context-scoping`, `conversational-mode`,
+>   `claude-code-profile`, `mcp-tool-filter`, `intent-graph`, `detailed-prompts`,
+>   `fullscreen-toggle`, `task-controls`, `share-chat`, `chat-comments`, `chat-goals`,
+>   `diff-visualizer`.
+> - **Out of scope** (archived, though also forks): `chat-reorder`, `archive-chats`,
+>   `project-folders`.
+
+**DEC-041 — Nested A0 reaches the harness via outer-sysctl + host-net, not `-p`.**
+Spike finding (CI run 23ae917): A0's UI binds `0.0.0.0:80`, a privileged port; under
+nested rootless podman the inner container's mapped-root can't bind it
+(`PermissionError [Errno 13]`). Also the inner container defaults to **host netns**, so a
+`--sysctl` on the *inner* run is rejected (`Network Namespace set to host`). Verified-working
+model: run the **devcontainer (outer)** with `--sysctl net.ipv4.ip_unprivileged_port_start=0`
+and the **A0 (inner)** container with `--network=host`; A0 then binds 80 on the shared
+devcontainer netns and the harness reaches it at `localhost:80`. Confirmed locally
+(`REACHED_80_OK`). _Refines DEC-032 (the nested boot/network contract). Alternative for
+production: configure A0 to serve a high (≥1024) port and use a normal rootless netns + `-p`._
+
+**DEC-040 — The rootless e2e harness MUST neutralize A0's `sshd` (or make it
+non-fatal).** Spike finding (CI run 156e82a): A0's `[program:run_sshd]` (`/usr/sbin/sshd
+-D`) **exits 255 under rootless podman** (privilege separation needs caps a mapped-root
+lacks); A0's `[eventlistener:the_listener]` runs with **no args**, so its
+`if not args or ...` kills the **entire instance** on *any* process `PROCESS_STATE_FATAL`
+— so a flapping sshd tears A0 down ~8s after boot. (The current harness never saw this:
+it runs under docker/rootful, where sshd starts.) SSH is irrelevant to HTTP e2e, so the
+harness replaces `/usr/sbin/sshd` with a no-op before `initialize.sh` (keeps the watchdog
+armed for genuinely-critical procs like `run_ui`). _Long-term: upstream A0 should scope
+`the_listener` to critical processes only, or make sshd optional. Appendix F.6._
+_Refines DEC-018/032._
+
+**DEC-039 — Devcontainer base MUST ship a modern podman; not Playwright+apt-podman.**
+Spike finding: basing on the official Playwright image (Ubuntu jammy) + apt `podman`
+(3.4.4) **fails** to nest rootlessly (`cannot setup namespace using newuidmap`). Basing on
+`quay.io/podman/stable` (podman 5.8.2, pre-configured `podman` user with working
+subuid/subgid + newuidmap caps) **nests cleanly** (verified locally: `NESTED_IN_DEVKIT_OK`,
+unprivileged). Therefore the devcontainer bases on a modern-podman image; **Playwright
+browser deps become a Phase-1 Fedora addition** (Playwright's `--with-deps` is
+Debian/Ubuntu-only). The Phase-0 gate needs no browser, so the spike image carries only
+podman + curl. _Refines DEC-018/031; resolves part of Q-021._
+> **Phase-1 update (2026-06-20):** Playwright-on-Fedora **resolved** — Node v22 (dnf) +
+> `playwright@1.48.0` + `chromium` with an explicit Fedora lib set; headless Chromium
+> launches inside the nested rootless devcontainer (`CHROMIUM_OK 130.0.6723.31`). DEC-039's
+> "Fedora browser deps" concern is closed.
+
+**DEC-032 — Nested boot/network contract (output of the Q-021 spike).** Inside the
+devcontainer, A0 is booted via rootless podman (or `podman compose`); the harness reaches
+it at `A0_BASE_URL` over a pinned network/port mapping. The spike MUST pin: the compose
+engine, the network mode, the port contract, and required volumes. `up`/`down` (E.1) are
+redefined to drive this nested boot, superseding the host-compose phrasing inherited from
+the pre-DEC-018 era. _Closes Major-8._
+
+**DEC-033 — Canonical terminology cleanup.** One term per concept: the post-install
+diagnostic is the **common stage of `verify-installed`** — the names
+`effectiveness-check`, `doctor`, `docker`, standalone `verify`, and `purge` are
+**non-normative/historical** and MUST NOT appear in REQs. REQ-CI-003's stage list is
+corrected to `install / verify-installed / uninstall / verify-uninstalled`. _Closes
+Major-2, Major-3._
+
+**DEC-034 — One canonical allowed-asset list (Appendix E.5).** A single list supersedes
+the divergent enumerations in REQ-DEV-002/004 and DEC-003/016/017. It includes plugin
+source, `plugin.yaml`/`meta.yaml`/`default_config.yaml`/`requirements.txt`,
+`tests/e2e/cases.yaml`, the `tests/e2e/hooks/*` scripts, the thin caller workflow, the
+AI-review workflow + rubric, the minimal Claude surface, the devkit submodule, and
+generated symlinks. _Closes Major-6._
+
+**DEC-035 — Snapshot baseline is captured once, pre-case-1.** The residue baseline is
+taken **once** before the first install; every `verify-uninstalled` diffs against that
+single baseline, so cross-case leakage (case 1 leaves residue surviving case 2's cycle)
+is caught. _Closes Major-5. Refines DEC-014._
+
+**DEC-036 — `enable`/`disable` are devkit primitives, hook-callable, not mandatory loop
+stages.** Given deferred-unload semantics (Appendix F.5), the standard loop does not force
+a toggle stage; `enable`/`disable` are primitives the `verify-installed` hook MAY invoke
+to assert enabled/disabled behaviour. A reference plugin MUST exercise them (verification).
+_Closes Major-1. Refines DEC-010._
+
+**DEC-037 — A devkit-provided `conformance` check enforces structural conformance.**
+`make conformance` (run in each repo's PR gate, per DEC-023) asserts the repo exposes the
+frozen E.1 target set and matches the E.5 asset list — this is how G5 "mechanical
+conformance" is enforced without touching the gate. _Closes Major-9._
+
+**DEC-038 — Structure check asserts manifest + entrypoints, not zip-path identity.** The
+unzip check asserts the install dir contains `plugin.yaml` and the plugin's declared
+entrypoints/extension folders; it does **not** assert a 1:1 zip↔install path identity
+(A0's installer may transform/skip), and **excludes dev-only files** (`tests/`, `.github/`,
+`.skills`-era cruft). _Closes Major-7. Refines DEC-013._
+
+**DEC-018 — The devkit ships a devcontainer image (reverses DEC-001).** The devkit
+publishes a single container definition carrying all execution tooling — Playwright,
+SSH, node, and **rootless podman** plus nesting tooling (e.g. fuse-overlayfs) — that runs
+the A0 container **nested inside it without privilege** (no `--privileged`, no host Docker
+socket). The same image is the execution surface in **all three** contexts:
+1. GitHub Actions CI runs the lifecycle inside it.
+2. A developer uses it as a dev container.
+3. An AI agent runs it (via docker or podman) to develop + test locally before pushing.
+_Supersedes DEC-001. Nesting is podman-in-podman / podman-in-docker / docker-in-docker,
+always rootless._
+
+**DEC-019 — The A0 image under test is a parameter.** Defaults to upstream
+`agent0ai/agent-zero` (tag policy per Q-008-followup); plugins that depend on operator-fork
+changes override it to the fork image. Declared per-plugin and overridable at the
+workflow/Make level. The A0 image runs as the nested container inside the devcontainer.
+_Closes Q-008._
+
+**DEC-020 — Reusable e2e workflow body lives in the devkit repo.** Referenced via
+`uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@<ref>`.
+The job runs the devcontainer image and invokes the lifecycle (`make e2e`) inside it. The
+thin caller workflow is rendered into the plugin repo by the ported bootstrap mechanism
+and kept current by the resync mechanism. _Closes Q-006; augments DEC-015, DEC-018._
+
+### Cycle-2 decisions (authoring & polish standard, 2026-06-20)
+
+**DEC-045 — The SPEC and acquired knowledge live in the devkit, never in assistant memory.**
+`SPEC.md`, every `SPEC-REVIEW-NNN.md`, and the durable operational knowledge an implementer
+needs (verified A0 runtime quirks → Appendix F; harness gotchas, fan-out classification,
+runbooks → `docs/`) are committed in the devkit repo and are the **system of record**.
+Assistant memory is a convenience cache only — it MUST be reconstructable from committed
+artifacts. Every Cycle-2 standard MUST be machine-checkable (conformance or e2e), so the
+contract is enforced, not remembered. _Opens Cycle 2; closes the operator ask "keep all
+acquired knowledge in a form we can retrieve and query."_
+
+**DEC-046 — Authoring skills + a shared CLAUDE block are vendored through the devkit.** The
+devkit vendors a curated **plugin-authoring skill set** (Appendix E.7 — the subset useful
+for building A0 plugins in general and ours in particular), sourced from
+`agent-zero-plugins-skills` and kept fresh by the sync mechanism. Separately, every plugin
+repo's `CLAUDE.md` carries a **common-guidelines block** (org-identical, delimited by
+`<!-- a0:common:start -->`/`<!-- a0:common:end -->` markers so sync can replace it
+in-place) plus a repo-specific section outside the markers. Plugin repos still do NOT
+vendor the full skills library (consistent with DEC-015/DEC-044) — only the curated set
+lives in the devkit, reachable via the submodule. _Theme 2. Augments DEC-044._
+
+**DEC-047 — Per-repo `DEVELOPING.md` from a devkit template.** Every plugin repo ships a
+`DEVELOPING.md` rendered from a devkit template that explains the devcontainer and the
+standard local dev/test loop (`make build → up → e2e → doctor → verify → down`), so any
+developer or agent can reproduce CI locally. Common body from the devkit; a thin
+per-repo header names the plugin. _Theme 3._
+
+**DEC-048 — A fixed README skeleton, plugin-specific content.** Every plugin README follows
+the Appendix E.8 skeleton (fixed section set + order): title + thumbnail, one-line
+description, **Why** (the rationale/problem it solves), install + behaviour media, inter-
+plugin dependencies, A0 compatibility, configuration, doctor, license. Distinct prose per
+plugin; identical structure so the fleet reads consistently and `make conformance` can
+check section presence. _Themes 4, 6, 7._
+
+**DEC-049 — A0 compatibility is a declared, verifiable field.** Each plugin declares
+`a0_compat: upstream | fork-required` in `.devkit.yml`. `fork-required` (the plugin needs a
+change only present in the operator's A0 fork) MUST name the required change and link the
+fork repo in the README. The classification is derived from a careful per-plugin
+**git-history analysis** (the why, what extension points it needs, when fork support was
+added) and MUST be consistent with the A0 image the plugin's e2e passes against (the e2e
+base image is the mechanical check; the history gives the human explanation). _Theme 4.
+The fork repo identity + per-plugin classification is Q-025._
+
+**DEC-050 — Apache-2.0 for first-party; forks keep upstream.** Every first-party plugin
+repo carries a root `LICENSE` = Apache-2.0 and `plugin.yaml license: Apache-2.0` (operator
+choice 2026-06-20; matches existing author metadata). Fork plugins retain and declare their
+upstream license — the Apache mandate never force-relicenses a fork. _Theme 5. Augments
+DEC-043._
+
+**DEC-051 — The harness auto-captures README media.** The devkit lifecycle captures, during
+the e2e run, a **screenshot** of the installed plugin card/config screen and a short
+**GIF/video** of the plugin's documented behaviour, emits them as CI artifacts, and commits
+them to a known path (`docs/media/`) as the README's visuals. The behaviour clip is
+produced by driving the behaviour verify (DEC-053), so docs show *verified* behaviour.
+Authors MAY override a specific asset, but auto-capture is the default and keeps media
+from drifting. _Themes 4, 6 (operator chose harness auto-capture)._
+
+**DEC-052 — `doctor` is a script at a known path (for now).** Every plugin ships
+`usr/plugins/<name>/scripts/doctor.py` (or the `plugin_dir` equivalent), runnable inside a
+booted A0 (`python …/doctor.py`), exit `0` iff healthy, checking: declared deps importable,
+config present + schema-valid (default_config.yaml as the schema baseline), and the
+plugin's extension points mounted. The e2e runs it post-install and asserts healthy. A
+shared in-product command that enumerates installed plugins and runs each doctor MAY wrap
+this later — deferred per operator ("just a script at a known location, for now"). _Theme 8._
+
+**DEC-053 — Behaviour-level verify is mandatory and gating.** Each plugin's `verify-installed`
+hook MUST assert the plugin's **running behaviour** against the live nested-A0 instance
+(UI via Playwright / API), not its implementation — unit/implementation tests do not
+satisfy this. It runs in the branch/PR e2e (one boot) and gates merge; the generic
+install→uninstall lifecycle remains necessary but is not sufficient. The same scripted flow
+feeds the media capture (DEC-051). _Theme 9. Refines DEC-026 (hook ABI) toward behavioural,
+not presence-only, assertions._
+
+---
+
+## Appendix B — Open questions
+
+These are the decision clusters to work through, one at a time. Each closes into one or
+more DECs.
+
+### Cluster 1 — Devkit packaging, granularity, seam & lifecycle — **CLOSED**
+- ~~Q-001~~ → DEC-001. ~~Q-002~~ → DEC-004. ~~Q-003~~ → DEC-005/006.
+
+### Cluster 2 — Target vocabulary & seam mechanisms — **CLOSED**
+- ~~Q-004~~ → DEC-008 (Appendix E.1). ~~Q-012~~ → DEC-009 ("doctor" folded into
+  `verify-installed`). ~~Q-013/Q-014~~ → DEC-012. ~~Q-015~~ → DEC-011 (hybrid:
+  declarative common + per-plugin hook).
+
+#### Cluster 2 follow-ups — **CLOSED by code inspection**
+- ~~Q-016~~ → DEC-013 (reuse `requirements.txt` + `meta.yaml`; no new schema).
+  ~~Q-017~~ → DEC-014 (runs every cycle + final; pre-install snapshot baseline).
+  ~~Q-018~~ → DEC-013 (structure derived from the zip).
+
+### Cluster 3 — Reusable CI workflows + devcontainer — **CLOSED (decisions)**
+- ~~Q-006~~ → DEC-020 (e2e body in devkit). ~~Q-008~~ → DEC-019 (A0 image is a param).
+  ~~Q-019~~ → DEC-015 (reuse ported skills mechanism, devkit-scoped). The architecture
+  pivoted to a **devcontainer** (DEC-018) — follow-ups below.
+
+#### Cluster 3 follow-ups
+- ~~Q-020~~ → DEC-021 (triggers). ~~Q-022~~ → DEC-017 (claude-code-action + `/code-review`).
+- **Q-021.** Devcontainer design: base image, rootless-podman-nesting approach (confirm it
+  works on GH-hosted `ubuntu-latest` without privilege), publish location
+  (`ghcr.io/agent-zero-plugins/plugin-devkit`?) + versioning/tagging. _Mostly
+  implementation; the SPEC pins the contract (no privilege). Revisit at impl time._
+- **Q-023.** Exact minimal Claude vendored surface (CLAUDE.md for plugin dev? `.claude/`
+  rules? which?). _Minor; fold into rollout._
+
+### Cluster 4 — Cleanup / residue mechanism — **CLOSED**
+- ~~Q-009~~ → DEC-022 (snapshot+diff, all four layers).
+
+### Cluster 5 — Rollout & sync — **CLOSED**
+- ~~Q-010~~ → DEC-023 (per-repo gate only). ~~Q-011~~ → DEC-025 (devkit repo).
+  ~~Q-024~~ → DEC-024 (phased fan-out de-vendors per repo).
+
+### Cluster 6 — Authoring & polish (Cycle 2) — **OPEN**
+- **Q-025.** Identity of the operator's **A0 fork** repo + its image tag, and the per-plugin
+  upstream-vs-fork classification. Blocks the *data* behind REQ-DOC-004 (not the contract).
+  Resolution: operator names the fork; a git-history fan-out classifies each plugin with
+  evidence. → feeds DEC-049.
+- **Q-026.** GIF/video tooling in the devcontainer (ffmpeg? Playwright video→GIF?), the
+  size/length budget, and where format is pinned. → refines DEC-051 / Appendix E.10.
+- **Q-027.** "Nice" thumbnail sourcing: the harness screenshot ≠ a designed card thumbnail.
+  Who/what produces the branded `webui/thumbnail.*` (design tool, author, generator)? →
+  refines DEC-048/DEC-051, REQ-DOC-005.
+- **Q-028.** Doctor config-validation depth: is `default_config.yaml` the schema source, and
+  how does doctor resolve `plugin_dir` for forks/build-generated plugins? → refines DEC-052.
+
+### Remaining (implementation-time, non-blocking)
+- **Q-021.** Devcontainer base + rootless-podman-nesting specifics + image publish/version.
+- **Q-023.** Exact minimal Claude vendored surface.
+_Both are implementation details; the SPEC pins their contracts. No open design decisions
+block a first implementation._
+
+---
+
+## Appendix E — Resource / field reference
+
+### E.1 — Frozen common Make targets (per DEC-008)
+
+| Target | Kind | Owner | Contract |
+|---|---|---|---|
+| `build` | artifact | devkit | Assemble the plugin directory (no-op for simple source-only plugins). |
+| `package` | artifact | devkit | Produce the versioned plugin zip from `plugin.yaml` version. |
+| `up` / `down` | lifecycle | devkit | Boot / teardown the A0 compose harness. |
+| `install` | lifecycle | devkit | Install the packaged zip into the running instance for the active case. |
+| `enable` / `disable` | lifecycle | devkit | Toggle the installed plugin via the A0 plugin API. |
+| `uninstall` (`delete`, `remove`) | lifecycle | devkit | Uninstall the plugin (one op, three names). |
+| `e2e` / `ci` | orchestrator | devkit | Run the full serial config-matrix: `up` → ∀ case `{install → verify-installed → uninstall → verify-uninstalled}` → `down`. |
+| `verify-installed` | assertion | devkit + **plugin hook** | (a) common effectiveness checks (E.3 deps + unzip structure), then (b) per-plugin hook, in series. |
+| `verify-uninstalled` | assertion | devkit + **plugin hook (opt)** | (a) common residue scan, then (b) optional per-plugin residue hook, in series. |
+| `link-*`, `update-skills` | vendoring | devkit/skills | Unchanged from current org Makefile. |
+
+_Hook targets are the only ones a plugin repo overrides._
+
+### E.2 — `tests/e2e/cases.yaml` (per DEC-012)
+
+```yaml
+# Absent file ⇒ a single implicit case: { name: default, config: {} }
+- name: default
+  config: {}
+- name: custom-backend
+  config: { backend: "remote", polling_interval_seconds: 5 }
+- name: debug-on
+  config: { debug: true }
+- name: boot-only-env          # needs a restart (env/MCP settings, Appendix F.4)
+  config: { ... }
+  requires_reboot: true        # per DEC-028 / REQ-LC-006
+```
+_`config` is applied post-install via the A0 plugin config API (read live — Appendix F.3),
+except `requires_reboot` cases which restart the A0 container first._
+
+### E.3 — `verify-installed` common-check sources (per DEC-013)
+
+No new manifest. The common stage reads existing declarations:
+
+| Check | Source of truth | Assertion in container |
+|---|---|---|
+| Pip deps installed | `requirements.txt` (canonical; installed by A0 `hooks.py` on enable) | each package importable in the A0 runtime venv |
+| Config/secret env present | `meta.yaml` `env[]` (`kind: config\|secret`) | each declared env var set in the container env |
+| Files landed | the packaged zip's file list (derived automatically) | each path exists under `/a0/usr/plugins/<name>/` |
+| Routes/extensions registered | (optional, per-plugin hook in stage (b)) | plugin-specific |
+
+Dep check semantics (per DEC-027): `requirements.txt` lines are parsed to **distribution
+names** (specifiers/extras/markers stripped; `-r`/URL/VCS lines resolved or flagged);
+presence is asserted via `importlib.metadata` **after** the verify-installed hook has
+exercised the plugin (A0 installs deps lazily — Appendix F.2), never by `import <pkgname>`.
+
+`meta.yaml env[]` presence (per DEC-030): `kind: config` ⇒ set-and-non-empty; `kind:
+secret` ⇒ declaration-wired only (placeholder allowed; real value absent in CI).
+
+### E.4 — Hook ABI (per DEC-026)
+
+| Aspect | Contract |
+|---|---|
+| Location | `tests/e2e/hooks/verify-installed`, `tests/e2e/hooks/verify-uninstalled` (executable; any language). Absent ⇒ no-op pass. |
+| Result | Exit code `0` = pass; non-zero = fail (that stage, with the script's stderr captured). |
+| Context (env) | `A0_BASE_URL`, `A0_USERNAME`, `A0_PASSWORD`, `A0_CONTAINER` (name/id for exec), `PLUGIN_NAME`, `CASE_NAME`, `CASE_CONFIG_JSON`, `A0_REPORT_DIR` (write artifacts here). |
+| Invocation | Called by the common target after its devkit-owned stage (a); cwd = repo root. |
+
+### E.5 — Canonical allowed-asset list (per DEC-034)
+
+A conforming plugin repo tracks **only**:
+- Plugin source: `plugin.yaml`, `meta.yaml`, `default_config.yaml`, `requirements.txt`,
+  `__init__.py`, `webui/`, `api/`, `extensions/`, `hooks.py` (as applicable).
+- `tests/e2e/cases.yaml` and `tests/e2e/hooks/*`.
+- The thin caller workflow (`.github/workflows/plugin-e2e.yml`).
+- The AI-review workflow (`.github/workflows/claude-code-review.yml`) + vendored rubric.
+- The minimal Claude surface (Q-023).
+- The devkit submodule + generated symlinks.
+
+`make conformance` (REQ-CONF-001) flags any tracked file outside this list.
+
+### E.6 — Phase-0 feasibility-spike acceptance (per DEC-031)
+
+The spike PASSES iff, on the target runner with **no `--privileged` and no host
+docker.sock mount**: the devcontainer starts; rootless podman inside it pulls and runs the
+A0 image; the harness reaches A0 at `A0_BASE_URL` and logs in; one full
+`install → verify-installed → uninstall → verify-uninstalled` cycle completes green. A
+documented self-hosted-runner fallback is produced if GH-hosted `ubuntu-latest` fails.
+
+---
+
+### E.7 — Curated authoring skill set vendored in the devkit (per DEC-046)
+
+Sourced from `agent-zero-plugins-skills`, kept fresh by sync. The set is "what helps build
+A0 plugins" — architecture, scaffolding, the manifest contract, testkit, troubleshooting —
+not the full org/meta library:
+
+| Skill | Why it's in the set |
+|---|---|
+| `a0-plugin-architecture` | Canonical plugin architecture (extension points, lifecycle). |
+| `a0-bootstrap-plugin` | Stand up a new plugin repo to the standard. |
+| `author-plugin-from-template` | Generate a plugin from `agent-zero-new-plugin-template`. |
+| `plugin-manifest-contract` | `plugin.yaml`/`meta.yaml` field contract. |
+| `a0-plugin-testkit` | Shared pytest scaffolding (already in the devkit `skill/`). |
+| `troubleshoot-plugin-deployment` | Diagnose install/deploy failures. |
+| `rotate-plugin-credentials` | Secret rotation for plugins that need it. |
+
+_Candidates deferred to Q-023/Q-025 review: the `manage-*` meta-skills (distribution-time,
+not authoring-time) and `contribute-plugin-to-gate` / `curate-vendor-plugins-gate` (gate
+workflow, not plugin authoring)._
+
+### E.8 — README skeleton (per DEC-048)
+
+Fixed headings, in order; prose is plugin-specific. `make conformance` checks presence.
+
+```
+# <Title>                         ← + card thumbnail image
+<one-line description>            ← matches plugin.yaml description
+## Why                           ← the problem it solves / rationale
+## See it                        ← harness-captured screenshot + behaviour GIF (docs/media/)
+## Install                       ← how to install in A0 (+ gate/OCI ref if applicable)
+## Configuration                 ← config keys (mirror default_config.yaml), or "none"
+## Dependencies                  ← inter-plugin deps (other A0 plugins) + external deps
+## Agent Zero compatibility      ← `upstream` | `fork-required` (+ fork repo link & the change)
+## Health (doctor)               ← how to run scripts/doctor.py inside A0
+## License                       ← Apache-2.0 (first-party) / upstream (forks)
+```
+
+### E.9 — Doctor contract (per DEC-052)
+
+- **Path:** `usr/plugins/<name>/scripts/doctor.py` (or `plugin_dir`/`scripts/doctor.py`).
+- **Run:** `python /a0/usr/plugins/<name>/scripts/doctor.py` inside a booted A0.
+- **Exit:** `0` healthy (incl. soft warnings), non-zero on any hard failure.
+- **Checks (minimum):** (a) each declared dependency importable; (b) config present and
+  schema-valid against `default_config.yaml`; (c) the plugin's declared extension points are
+  mounted in the live A0. Output is a per-check `PASS`/`WARN`/`FAIL` summary.
+- **CI:** the e2e runs doctor post-install and fails the gate on non-zero (REQ-DR-003).
+
+### E.10 — Behaviour media (per DEC-051)
+
+- **Committed path:** `docs/media/` — `installed.png` (card/config screenshot),
+  `behaviour.gif` (or `.webm`) of the documented flow.
+- **Producer:** the devkit lifecycle, driving the behaviour verify (DEC-053); emitted as CI
+  artifacts and committed/refreshed at the known path.
+- **README embed:** the §E.8 "See it" section references these paths.
+- _Tooling/format/size budget: Q-026._
+
+---
+
+## Appendix F — Assumed A0 runtime behaviour (grounds NG1; per XCut-1)
+
+These are **verified** against the A0 source (`agent-zero-operator/agent-zero`); if A0
+changes them, the cited REQs must be revisited.
+
+- **F.1 — Uninstall does NOT remove pip deps.** `delete_plugin()` (helpers/plugins.py)
+  deletes the plugin dir + clears caches + purges `sys.modules`; there is no `pip
+  uninstall`. ⇒ DEC-029 excludes declared deps from residue.
+- **F.2 — Deps install lazily at first use, not on install.** No centralized installer;
+  plugins self-install on first use. ⇒ DEC-027 checks dist-presence after the hook runs.
+- **F.3 — `config.json` is read live, per-operation.** `get_plugin_config()` reads disk
+  each call; config saves don't invalidate caches. ⇒ DEC-028 single-boot matrix valid.
+- **F.4 — Boot-only classes:** env-var-derived settings (read once at boot) and MCP
+  settings. ⇒ DEC-028 `requires_reboot` escape hatch.
+- **F.5 — Toggle is filesystem state with deferred unload.** `toggle_plugin()` writes
+  `.toggle-{0,1}` + `after_plugin_change()`; loaded Python unloads only if python files
+  changed. ⇒ DEC-036 treats enable/disable as primitives, not assumed-live transitions.
+- **F.6 — A0 self-destructs on any supervised-process FATAL.**
+  `docker/run/fs/etc/supervisor/conf.d/supervisord.conf` registers `the_listener`
+  (`supervisor_event_listener.py`) on `PROCESS_STATE_FATAL` with **no args**; the listener
+  `kill -15 1` (then `kill -9 -1`) the whole instance on any FATAL. `run_sshd` exits 255
+  under rootless podman → FATAL → instance dies. ⇒ DEC-040 neutralizes sshd in the rootless
+  harness. (Note: a `DEBUG` env var makes the listener a no-op — useful but broader.)
