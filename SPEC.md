@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 9 — Cycle-1 (harness/layout/distribution) SHIPPED, fan-out complete (19/19 standardized + merged; `phantom-bridge` excepted, public fork); Cycle-2 (authoring & polish standard, §5.7–5.13 / DEC-045–053) drafted + **post-SPEC-REVIEW-002 sweep** (25 findings closed/deferred))
+**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved** — two-tier fork model (DEC-049/054), 18 `upstream` / 1 `fork-required`, `docs/a0-compatibility.md`)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -99,6 +99,13 @@ This spec covers the shared quality and structure standard applied across the
   live A0 instance (UI/API), as opposed to implementation/unit tests (DEC-053).
 - **A0 compatibility** — a plugin's declared dependency on stock upstream A0 vs. the
   operator's A0 fork (`a0_compat: upstream | fork-required`, DEC-049).
+- **Internal fork (NuevaNext)** — `NuevaNext/agent-zero` branch `nuevanext`: the fast-moving
+  *internal* fork. Periodically fetched-from-upstream and its commits reorganised into
+  upstreamable change-groups. Its image `ghcr.io/nuevanext/agent-zero` is the **currently**
+  consumed/tested A0 image for `fork-required` plugins (DEC-049/DEC-054).
+- **Public fork (operator)** — `agent-zero-operator/agent-zero`: the *visible upstreaming*
+  fork that SHOULD carry one open PR to upstream per change-group. The **target** compat
+  reference once maintained; plugins repoint to it later (DEC-054, Q-029).
 - **Common CLAUDE block** — the marker-delimited, org-identical guidance block every
   plugin repo's `CLAUDE.md` carries, refreshed by sync (DEC-046).
 - **Behaviour media** — harness-captured screenshot + GIF/video of the plugin installed
@@ -198,7 +205,7 @@ _(REQs are added cluster-by-cluster as decisions are made.)_
 | REQ-DOC-001 | Every plugin repo **MUST** ship a `DEVELOPING.md` rendered from the devkit template, documenting the devcontainer and the standard local dev/test loop (`build → up → e2e → doctor → verify → down`). | DEC-047 | Repo, Devkit |
 | REQ-DOC-002 | Every plugin repo's `README.md` **MUST** follow the standard skeleton (Appendix E.8): title + thumbnail, one-line description, **Why**, install/behaviour media, configuration, inter-plugin dependencies, A0 compatibility, doctor, license. Content is plugin-specific; the skeleton is fixed. | DEC-048 | Repo |
 | REQ-DOC-003 | A plugin's README **MUST** embed the harness-captured install/behaviour media (§5.11) as its primary visual, referenced from the committed known path. | DEC-048, DEC-051 | Repo |
-| REQ-DOC-004 | Every plugin **MUST** declare its A0 compatibility as `a0_compat: upstream \| fork-required` (in `.devkit.yml`); `fork-required` **MUST** name the required fork change and link the fork repo, and **MUST** be consistent with the A0 image its e2e passes against. | DEC-049 | Repo, Doc |
+| REQ-DOC-004 | Every plugin **MUST** declare `a0_compat: upstream \| fork-required` in `.devkit.yml`, consistent with the A0 image its e2e passes against (REQ-CI-005). A `fork-required` plugin **MUST** set `a0_image` to the fork image (currently the internal `ghcr.io/nuevanext/agent-zero` — DEC-049/054), name the required fork change, and — once the public fork is maintained (Q-029) — link the public fork + the specific upstreaming PR in its README "Agent Zero compatibility" section. | DEC-049, DEC-054 | Repo, Doc |
 | REQ-DOC-005 | Every plugin's `plugin.yaml` **MUST** carry a human-readable `description`, and the card **MUST** ship a real `webui/thumbnail.*`. The placeholder stubs generated during Cycle-1 standardization (solid-colour 16×16 PNGs) **MUST** be replaced; conformance rejects a thumbnail below a minimum dimension/byte threshold (Appendix E.8). _Gap-1 of SPEC-REVIEW-002._ | DEC-048, DEC-051 | Repo |
 | REQ-DOC-006 | A plugin's inter-plugin dependencies **MUST** be declared in `.devkit.yml` as `depends_on: [<plugin-name>…]` (the checkable source); the README "Dependencies" section mirrors it. Absent/empty ⇒ no inter-plugin deps. _Gap-4 of SPEC-REVIEW-002._ | DEC-048 | Repo |
 
@@ -726,9 +733,27 @@ unproven assertion._ The mechanical proof:
   backed by *two* observations (passes-on-fork, and the named upstream gap), not a label.
 
 The classification is seeded by a per-plugin **git-history analysis** (the why, the extension
-points, when fork support landed) and then frozen by the matrix result. _Theme 4. Fork repo
-identity + per-plugin classification + whether to run the dual-image matrix in every PR or
-nightly = Q-025._
+points, when fork support landed) and then frozen by the matrix result.
+
+**Fork topology (resolved from the theme-4 analysis, 2026-06-20 — Q-025 closed).** There are
+**two** forks, and they play different roles:
+- **Internal fork** `NuevaNext/agent-zero@nuevanext` (image `ghcr.io/nuevanext/agent-zero`) —
+  fast-moving, where fork features actually land. **For now** this is the image
+  `fork-required` plugins set as `a0_image` and test against (the public fork's maintenance
+  has lapsed and no plugin is open-source yet, so pointing at the internal image is acceptable
+  interim).
+- **Public fork** `agent-zero-operator/agent-zero` — the visible upstreaming fork; the
+  **target** reference (DEC-054). `agent-zero-operator/agent-zero` carries only infra changes
+  today and **none** of the plugin `@extensible` seams, so it is NOT yet a valid test target.
+
+**Theme-4 result:** of the 19, **18 are `upstream` and exactly one is `fork-required`** —
+`context-scoping` (needs the `@extensible` seam on `_memory.get_agent_memory_subdir` + four
+sibling memory/skills/subagent seams, present in `NuevaNext/agent-zero@nuevanext`, absent in
+stock upstream). **It is the proof case for DEC-053:** it ships *no* behaviour hook and *no*
+`a0_image` override, so its e2e is green on stock upstream **where its scoping is inert** — a
+presence-only test masking a real regression. The full per-plugin classification +
+evidence is committed at `docs/a0-compatibility.md`. _Theme 4; Q-025 closed; repoint-to-public
+timing = Q-029._
 
 **DEC-050 — Apache-2.0 for first-party; forks keep upstream.** Every first-party plugin
 repo carries a root `LICENSE` = Apache-2.0 and `plugin.yaml license: Apache-2.0` (operator
@@ -782,6 +807,25 @@ checks (those remain the *common* stage's job, not the plugin behaviour stage). 
 the branch/PR e2e (one boot) and gates merge; the generic install→uninstall lifecycle stays
 necessary but insufficient. The same scripted interaction feeds the media capture (DEC-051).
 _Theme 9. Augments DEC-026._
+
+**DEC-054 — Two-tier fork model: the public fork is the upstreaming surface; plugins repoint
+to it once it's maintained.** _Added 2026-06-20 from the operator's fork-topology explanation;
+closes Q-025._ The model: the **internal fork** (`NuevaNext/agent-zero@nuevanext`) is where
+features land fast and is rebased into upstreamable change-groups; the **public fork**
+(`agent-zero-operator/agent-zero`) is the visible surface that should carry one open PR to
+upstream per change-group. Target end-state:
+- **The public fork MUST carry a fork-declaration README**: a clear "this is a fork" notice,
+  the *reason* for forking, a **table of open upstreaming PRs** (one row per change-group,
+  each linking the PR against upstream so consumers can 👍/+1 it), and a reference to the
+  **consumable fork image**.
+- **Repoint plan (gated on the public fork being maintained — Q-029):** once the change-groups
+  have open PRs on the public fork, every `fork-required` plugin MUST repoint `a0_image` from
+  the internal `ghcr.io/nuevanext/agent-zero` to the **public** fork image, AND its README
+  "Agent Zero compatibility" section MUST link the public fork (short intro: what it adds +
+  why) and the specific upstreaming PR it depends on. **Until then**, the internal image is
+  the accepted interim target (DEC-049) and `agent-zero-operator/agent-zero` — which today
+  carries only infra changes, none of the plugin seams — is NOT a valid test target.
+_Theme 4. Augments DEC-049; repoint timing = Q-029._
 
 ### Cycle-2 review closures (SPEC-REVIEW-002, 2026-06-20)
 
@@ -865,10 +909,22 @@ more DECs.
   ~~Q-024~~ → DEC-024 (phased fan-out de-vendors per repo).
 
 ### Cluster 6 — Authoring & polish (Cycle 2) — **OPEN**
-- **Q-025.** Identity of the operator's **A0 fork** repo + its image tag, and the per-plugin
-  upstream-vs-fork classification. Blocks the *data* behind REQ-DOC-004 (not the contract).
-  Resolution: operator names the fork; a git-history fan-out classifies each plugin with
-  evidence. → feeds DEC-049.
+- ~~**Q-025**~~ → **CLOSED** (2026-06-20) by the theme-4 analysis + operator's fork-topology
+  explanation → DEC-049 + DEC-054. Two-tier fork model (internal `NuevaNext/agent-zero` vs
+  public `agent-zero-operator/agent-zero`); 18 `upstream` / 1 `fork-required` (context-scoping);
+  `docs/a0-compatibility.md`.
+- **Q-029.** Timing of the **repoint to the public fork**: when the internal change-groups have
+  open upstreaming PRs on `agent-zero-operator/agent-zero` (and it carries the seams + a
+  fork-declaration README), `fork-required` plugins flip `a0_image` to the public image and add
+  the fork+PR README links (DEC-054). Gated on the public-fork maintenance pass, which is not yet
+  scheduled. → resolves into the repoint PRs.
+- **Q-026.** GIF/video tooling in the devcontainer (ffmpeg? Playwright video→GIF?), the
+  size/length budget, and where format is pinned. → refines DEC-051 / Appendix E.10.
+- **Q-027.** "Nice" thumbnail sourcing: the harness screenshot ≠ a designed card thumbnail.
+  Who/what produces the branded `webui/thumbnail.*` (design tool, author, generator)? →
+  refines DEC-048/DEC-051, REQ-DOC-005.
+- **Q-028.** Doctor config-validation depth: is `default_config.yaml` the schema source, and
+  how does doctor resolve `plugin_dir` for forks/build-generated plugins? → refines DEC-052.
 - **Q-026.** GIF/video tooling in the devcontainer (ffmpeg? Playwright video→GIF?), the
   size/length budget, and where format is pinned. → refines DEC-051 / Appendix E.10.
 - **Q-027.** "Nice" thumbnail sourcing: the harness screenshot ≠ a designed card thumbnail.
