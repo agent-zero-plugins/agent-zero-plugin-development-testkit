@@ -8,4 +8,8 @@ import { baseConfig } from "../playwright-base.config";
 export default defineConfig({
   ...baseConfig(__dirname),
   testDir: ".",
+  // Generous per-test timeout: installing a real plugin's pip deps in the
+  // nested A0 can take minutes (e.g. livekit-agents). Playwright's 30s default
+  // fires long before installFromZip's own 90s "Plugin installed:" wait.
+  timeout: 300_000,
 });
