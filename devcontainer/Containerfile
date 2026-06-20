@@ -1,0 +1,35 @@
+# Agent Zero plugin devkit — unified execution environment.
+#
+# One image, three uses (SPEC DEC-018): CI runner, developer dev container,
+# AI-agent local env. It boots the Agent Zero container *nested and
+# unprivileged* via rootless podman — no --privileged, no host docker.sock.
+#
+# BASE CHOICE (Phase-0 spike finding, 2026-06-19):
+#   The obvious base — the official Playwright image (Ubuntu jammy) + apt
+#   `podman` — FAILS to nest rootlessly: jammy ships podman 3.4.4, and nested
+#   rootless `podman run` dies with "cannot setup namespace using newuidmap".
+#   quay.io/podman/stable (modern podman, purpose-built + pre-configured for
+#   rootless nesting) WORKS. So we base on it and add the harness tooling.
+#
+#   Trade-off: it's Fedora-based, so Playwright browser system-deps are a
+#   Phase-1 addition (Playwright's `--with-deps` is Debian/Ubuntu-only; on
+#   Fedora the deps are installed explicitly). The Phase-0 GATE is *nesting*,
+#   which needs no browser — so the spike image carries only what the
+#   acceptance needs (podman + curl). Node/Playwright land in Phase 1.
+
+FROM quay.io/podman/stable
+
+# Harness tooling the Phase-0 acceptance needs. podman + fuse-overlayfs +
+# the rootless plumbing already ship in this base and are pre-configured.
+RUN microdnf install -y curl jq \
+ && microdnf clean all
+
+# The base ships an unprivileged `podman` user with a working subuid/subgid
+# range and newuidmap/newgidmap caps — the exact setup the Ubuntu path lacked.
+USER podman
+WORKDIR /workspace
+
+# Sanity: report the (modern) podman this base provides.
+RUN podman --version
+
+ENTRYPOINT ["/bin/bash"]
