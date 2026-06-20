@@ -1,0 +1,79 @@
+# Reusable plugin e2e workflow (SPEC DEC-020). A plugin repo invokes it:
+#
+#   jobs:
+#     e2e:
+#       uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@v1
+#       with:
+#         plugin_dir: usr/plugins/my_plugin
+#         plugin_display_name: "My Plugin"
+#
+# It builds the devkit devcontainer from the vendored devkit, packages the
+# plugin, and runs the full install → verify-installed → uninstall →
+# verify-uninstalled lifecycle with A0 booted NESTED + rootless (Phase-0 model).
+name: plugin-e2e
+
+on:
+  workflow_call:
+    inputs:
+      plugin_dir:
+        description: "Directory containing the plugin's plugin.yaml."
+        required: true
+        type: string
+      plugin_display_name:
+        description: "Plugin title as shown on its card in A0."
+        required: true
+        type: string
+      a0_image:
+        description: "A0 image under test (DEC-019). Override to the fork if needed."
+        required: false
+        type: string
+        default: "docker.io/agent0ai/agent-zero:latest"
+      devkit_dir:
+        description: "Path to the vendored devkit submodule."
+        required: false
+        type: string
+        default: "tests/_testkit"
+      hook_dir:
+        description: "Directory holding the plugin's verify-* hooks."
+        required: false
+        type: string
+        default: "tests/e2e/hooks"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build devkit devcontainer (rootless)
+        run: podman build -t plugin-devkit:ci -f "${{ inputs.devkit_dir }}/devcontainer/Containerfile" "${{ inputs.devkit_dir }}/devcontainer"
+
+      - name: Package plugin + run lifecycle (A0 nested, unprivileged)
+        env:
+          PLUGIN_DIR: ${{ inputs.plugin_dir }}
+          PLUGIN_DISPLAY_NAME: ${{ inputs.plugin_display_name }}
+          A0_IMAGE: ${{ inputs.a0_image }}
+          DEVKIT_DIR: ${{ inputs.devkit_dir }}
+          HOOK_DIR_REL: ${{ inputs.hook_dir }}
+        run: |
+          set -euo pipefail
+          PLUGIN_NAME=$(sed -nE 's/^name:[[:space:]]*"?([A-Za-z0-9_-]+)"?.*/\1/p' "$PLUGIN_DIR/plugin.yaml" | head -1)
+          echo "plugin: $PLUGIN_NAME"
+          mkdir -p dist
+          ( cd "$PLUGIN_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip" . -x 'tests/*' '.github/*' '*/node_modules/*' )
+          podman run --rm \
+            --device /dev/fuse \
+            --security-opt label=disable \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -v "$GITHUB_WORKSPACE":/workspace:ro \
+            -v "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip":/tmp/plugin.zip:ro \
+            -e A0_IMAGE="$A0_IMAGE" \
+            -e PLUGIN_ZIP=/tmp/plugin.zip \
+            -e PLUGIN_DISPLAY_NAME="$PLUGIN_DISPLAY_NAME" \
+            -e PLUGIN_NAME="$PLUGIN_NAME" \
+            -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
+            plugin-devkit:ci \
+            -lc 'bash /workspace/'"$DEVKIT_DIR"'/e2e/harness/run-lifecycle.sh'
