@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`)
+**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -833,6 +833,21 @@ upstream per change-group. Target end-state:
   carries only infra changes, none of the plugin seams — is NOT a valid test target.
 _Theme 4. Augments DEC-049; repoint timing = Q-029._
 
+**DEC-055 — Fork-first e2e: the default image is the operator fork; stock upstream is added
+later as a second target.** _Operator decision 2026-06-20; **supersedes** the "stock-upstream
+default + fork-required override" stance of DEC-019/DEC-049._ The e2e default `a0_image` is the
+**latest operator fork image** `ghcr.io/nuevanext/agent-zero:latest-nonroot` — the real
+deployment target, so we test what we actually ship. Every plugin's e2e runs against it (a
+single-target matrix) and MUST pass. **Then**, once behaviour hooks (DEC-053) exist and the
+fork-target matrix is green on GitHub, add **stock upstream** (`agent0ai/agent-zero:latest`) as
+a *second* image via a one-line `.devkit.yml`/matrix entry; the behaviour tests that **fail** on
+stock upstream then (a) empirically identify the genuinely `fork-required` plugins and (b)
+validate that the behaviour tests are correctly written (a fork-dependent feature's test MUST
+fail on stock). So `a0_compat` becomes an **output of the two-image observation**, not a
+hand-asserted label — the durable form of DEC-049's matrix. The fork image is **private** (ghcr),
+so the e2e MUST authenticate to pull it; auth mechanism = Q-030. _Reframes DEC-049 to fork-first;
+context-scoping no longer needs a per-repo `a0_image` override (the default is already the fork)._
+
 ### Cycle-2 review closures (SPEC-REVIEW-002, 2026-06-20)
 
 25 findings (3 Critical · 7 Major · 5 Minor · 6 Gap · 4 XCut). Disposition:
@@ -919,6 +934,13 @@ more DECs.
   explanation → DEC-049 + DEC-054. Two-tier fork model (internal `NuevaNext/agent-zero` vs
   public `agent-zero-operator/agent-zero`); 18 `upstream` / 1 `fork-required` (context-scoping);
   `docs/a0-compatibility.md`.
+- **Q-030.** ghcr pull auth for the private fork image (DEC-055): the e2e must `podman login
+  ghcr.io` to pull `ghcr.io/nuevanext/agent-zero:latest-nonroot`. Mechanism options: (a) extend
+  the existing sync App with `packages:read` + install on `NuevaNext` → the already-minted App
+  token pulls it (no new secret — fits batteries-included); (b) a new `GHCR_PULL_TOKEN` PAT
+  secret (read:packages) per repo/org; (c) grant the package read-access to the
+  `agent-zero-plugins` org so each repo's `GITHUB_TOKEN` pulls it. Blocks flipping the default
+  image live (a private pull without auth fails every repo's e2e).
 - **Q-029.** Timing of the **repoint to the public fork**: when the internal change-groups have
   open upstreaming PRs on `agent-zero-operator/agent-zero` (and it carries the seams + a
   fork-declaration README), `fork-required` plugins flip `a0_image` to the public image and add
