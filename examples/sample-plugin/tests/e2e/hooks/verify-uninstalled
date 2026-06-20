@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Per-plugin verify-uninstalled hook (SPEC Appendix E.4). Plugin-specific
+# residue knowledge — the devkit already asserts the plugin's own dir is gone;
+# here a plugin checks anything bespoke it created outside that dir.
+set -euo pipefail
+echo "[sample verify-uninstalled] case=$CASE_NAME plugin=$PLUGIN_NAME"
+# This plugin keeps everything under its own dir, so its only check is that the
+# webui asset is gone (the devkit common stage already covered the dir).
+if podman exec "$A0_CONTAINER" test -e "/a0/usr/plugins/$PLUGIN_NAME/webui/thumbnail.png"; then
+  echo "[sample verify-uninstalled] leftover thumbnail asset (defect)" >&2
+  exit 1
+fi
+echo "[sample verify-uninstalled] no leftover ✓"

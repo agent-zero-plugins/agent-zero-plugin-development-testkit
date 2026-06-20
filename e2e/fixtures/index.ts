@@ -2,7 +2,7 @@ import type { Page, TestType } from "@playwright/test";
 
 import { ChatPage } from "../pages/ChatPage";
 import { LoginPage } from "../pages/LoginPage";
-import { PluginsPage } from "../pages/PluginsPage";
+import { PluginsPage, suppressOnboarding } from "../pages/PluginsPage";
 
 /**
  * Base e2e fixtures shared across A0 plugin repos.
@@ -68,6 +68,9 @@ export function createA0Fixtures<T extends TestType<any, any>>(base: T) {
     },
 
     loggedInPage: async ({ page, credentials }, use) => {
+      // Neutralize A0's first-run onboarding modal before any navigation — it
+      // auto-opens with no provider key and would intercept all clicks.
+      await suppressOnboarding(page);
       const login = new LoginPage(page);
       await login.goto();
       await login.login(credentials.username, credentials.password);

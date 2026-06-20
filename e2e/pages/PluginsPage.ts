@@ -1,6 +1,54 @@
 import { expect, Locator, Page } from "@playwright/test";
 
 /**
+ * A0's first-run onboarding modal (`/plugins/_onboarding/...`, "Welcome to
+ * Agent Zero") auto-opens on every page load while no chat model is configured,
+ * and its overlay intercepts pointer events on everything beneath — including
+ * the top-nav. Close any open modal via A0's global `closeModal()` (falling
+ * back to Escape) until none remain. Idempotent + safe when nothing is open.
+ */
+export async function dismissFirstRunModals(page: Page): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    if ((await page.locator("div.modal.show:visible").count()) === 0) return;
+    await page.evaluate(() => (globalThis as { closeModal?: () => void }).closeModal?.());
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+/**
+ * Neutralize A0's first-run onboarding modal for the whole session.
+ *
+ * The modal (`/plugins/_onboarding/...`) auto-opens on every page load while no
+ * provider API key is configured, and re-opens itself mid-flow — dismissing it
+ * once isn't enough, and disabling the builtin plugin / seeding a key doesn't
+ * stop it. Inject a stylesheet (via `addInitScript`, so it re-applies on every
+ * navigation incl. reloads) that hides the modal so it can never intercept
+ * pointer events. Harmless to e2e — plugins don't need onboarding.
+ *
+ * MUST be called before the first navigation (i.e. before `LoginPage.goto`).
+ */
+export async function suppressOnboarding(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const inject = () => {
+      if (document.getElementById("__e2e_suppress_onboarding")) return;
+      const s = document.createElement("style");
+      s.id = "__e2e_suppress_onboarding";
+      // Hide the onboarding modal AND neutralize the modal backdrop it leaves
+      // behind (an orphaned dimming overlay that also intercepts clicks).
+      // pointer-events:none on the backdrop lets clicks reach modal content
+      // (which keeps its own pointer-events) while never blocking the page.
+      s.textContent =
+        'div.modal[data-modal-path*="_onboarding"]{display:none !important;}' +
+        "div.modal-backdrop{pointer-events:none !important;}";
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.head) inject();
+    document.addEventListener("DOMContentLoaded", inject);
+  });
+}
+
+/**
  * Page Object for Agent Zero's Plugins panel.
  *
  * Surface covered by this class:
@@ -39,12 +87,15 @@ export class PluginsPage {
     this.customTab = page.getByRole("tab", { name: "Custom" });
     this.installButton = page.getByRole("button", { name: /Install/ });
 
-    this.installDialog = page.getByRole("heading", { name: "Install Plugin" }).locator("..").locator("..");
-    this.zipTab = page.getByRole("tab", { name: /ZIP/ });
+    // The install flow opens A0's plugin-installer modal (a tabbed
+    // Browse / Git / ZIP dialog). Scope to that modal by its modal-path —
+    // there is no "Install Plugin" heading to anchor on.
+    this.installDialog = page.locator('div.modal.show[data-modal-path*="_plugin_installer"]');
+    this.zipTab = this.installDialog.getByRole("tab", { name: /ZIP/ });
     // A0's ZIP upload is a styled drop-zone; the real <input type="file">
-    // is hidden. Playwright's setInputFiles works on the hidden input
-    // directly — no need to simulate the click.
-    this.zipFileInput = this.installDialog.locator('input[type="file"]');
+    // is hidden. The ZIP tab's input is the last file input in the modal.
+    // Playwright's setInputFiles works on the hidden input directly.
+    this.zipFileInput = this.installDialog.locator('input[type="file"]').last();
   }
 
   /**
@@ -62,8 +113,11 @@ export class PluginsPage {
       .last();
   }
 
-  /** Open the Plugins panel from the top nav. */
+  /** Open the Plugins panel from the top nav. Dismisses A0's first-run
+   *  onboarding modal first — its overlay would otherwise intercept the
+   *  top-nav click. */
   async open(): Promise<void> {
+    await dismissFirstRunModals(this.page);
     await this.topNavButton.click();
     await expect(this.customTab).toBeVisible();
   }
@@ -133,10 +187,11 @@ export class PluginsPage {
     // (see .agent-zero/webui/js/confirmClick.js):
     //   first click  — button text flips to "Confirm", 2s timeout starts
     //   second click — confirms and fires the action
-    // The Delete button carries a stable `plugin-dropdown-delete` class
-    // (doesn't change across click states). Scope to the card so we
-    // never race against another plugin's dropdown.
-    const deleteBtn = card.locator(".plugin-dropdown-delete");
+    // The Delete button carries a stable `plugin-dropdown-delete` class.
+    // A0 portals the dropdown flyout OUTSIDE the card subtree, so it must be
+    // located at page scope, not card scope. Only one kebab dropdown is open
+    // at a time (we just clicked this card's), so this can't race.
+    const deleteBtn = this.page.locator(".plugin-dropdown-delete:visible");
     await deleteBtn.waitFor({ state: "visible" });
     await deleteBtn.click();
     await deleteBtn.click();
@@ -169,9 +224,12 @@ export class PluginsPage {
     await this.installDialog
       .getByRole("button", { name: /Install Plugin/ })
       .click();
-    await this.page
-      .getByRole("button", { name: /Install Anyway/ })
-      .click();
+    // The security-warning step ("Install Anyway") appears for unsigned/local
+    // zips. Click it when present; tolerate its absence.
+    const installAnyway = this.page.getByRole("button", { name: /Install Anyway/ });
+    if (await installAnyway.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await installAnyway.click();
+    }
 
     // Wait for the server-side install to finish. A0's pluginInstallStore
     // flips `result` once the POST resolves — the dialog renders a

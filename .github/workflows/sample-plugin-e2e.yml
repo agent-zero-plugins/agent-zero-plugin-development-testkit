@@ -1,0 +1,21 @@
+# Dogfood: run the devkit's OWN reusable plugin-e2e workflow against the bundled
+# sample plugin. Proves the full lifecycle (install → verify-installed →
+# uninstall → verify-uninstalled, A0 nested rootless) on a GitHub-hosted runner —
+# and that the reusable workflow + Makefile/harness all compose.
+name: sample-plugin-e2e
+
+on:
+  push:
+    branches: ["main", "phase1/playwright-fedora"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  sample-e2e:
+    uses: ./.github/workflows/plugin-e2e.yml
+    with:
+      plugin_dir: examples/sample-plugin
+      plugin_display_name: "Sample Plugin"
+      devkit_dir: "."
+      hook_dir: examples/sample-plugin/tests/e2e/hooks
