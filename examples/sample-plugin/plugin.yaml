@@ -1,0 +1,9 @@
+name: sample_plugin
+title: "Sample Plugin"
+version: "0.1.0"
+description: >
+  Minimal devkit fixture plugin. Carries no behaviour — it exists solely so the
+  e2e harness can exercise the install → verify-installed → uninstall →
+  verify-uninstalled lifecycle against a real Agent Zero instance.
+author: "agent-zero-plugins devkit"
+license: Apache-2.0

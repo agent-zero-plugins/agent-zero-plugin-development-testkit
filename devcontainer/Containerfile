@@ -25,12 +25,12 @@ FROM quay.io/podman/stable
 ARG PLAYWRIGHT_VERSION=1.48.0
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN dnf install -y \
-      curl jq nodejs npm \
+      curl jq zip unzip diffutils nodejs npm \
       nss nspr atk at-spi2-atk at-spi2-core cups-libs libdrm libxkbcommon \
       libXcomposite libXdamage libXext libXfixes libXrandr libXcursor libXi libXtst \
       libX11 libxcb mesa-libgbm pango cairo alsa-lib dbus-libs expat \
  && dnf clean all \
- && npm install -g "playwright@${PLAYWRIGHT_VERSION}" \
+ && npm install -g "playwright@${PLAYWRIGHT_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}" \
  && npx --yes "playwright@${PLAYWRIGHT_VERSION}" install chromium \
  && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
  && echo "export NODE_PATH=$(npm root -g)" > /etc/profile.d/node_path.sh
