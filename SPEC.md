@@ -236,7 +236,7 @@ _(REQs are added cluster-by-cluster as decisions are made.)_
 
 | ID | Requirement | Trace | Impl |
 |---|---|---|---|
-| REQ-BEH-001 | Every plugin's `verify-installed` hook (Appendix E.4) **MUST** include ≥1 assertion that drives the live A0 over the wire (Playwright against `A0_BASE_URL` or an HTTP API call) and asserts a plugin-specific observable effect — it **MUST NOT** consist solely of `podman exec` file/dependency presence checks. | DEC-053 | Repo |
+| REQ-BEH-001 | Every plugin **MUST** carry ≥1 falsifiable behaviour assertion that drives the live A0 over the wire and asserts a plugin-specific observable effect — preferably `tests/e2e/behaviour.mjs` (in-browser seam, Appendix E.11), or the `verify-installed` hook making a Playwright/HTTP call. It **MUST NOT** be satisfied by `podman exec` file/dependency presence checks alone. | DEC-053, DEC-056 | Repo |
 | REQ-BEH-002 | The behaviour verify **MUST** run in the branch/PR e2e gate (one nested-A0 boot) and gate merge; the generic install/uninstall lifecycle is necessary but **MUST NOT** be the only behavioural check. | DEC-053 | Workflow |
 | REQ-BEH-003 | The behaviour verify **SHOULD** be the same flow the media capture (§5.11) records, so a green behaviour check and the README GIF are the same evidence. | DEC-053, DEC-051 | Repo, Devkit |
 
@@ -848,6 +848,20 @@ hand-asserted label — the durable form of DEC-049's matrix. The fork image is 
 so the e2e MUST authenticate to pull it; auth mechanism = Q-030. _Reframes DEC-049 to fork-first;
 context-scoping no longer needs a per-repo `a0_image` override (the default is already the fork)._
 
+**DEC-056 — In-browser behaviour seam (`tests/e2e/behaviour.mjs`).** _Refines DEC-053; added +
+implemented 2026-06-21._ Because most plugins are UI injections, the falsifiable behaviour check
+is expressed (preferably) as an **in-browser seam**: a plugin ships `tests/e2e/behaviour.mjs`
+default-exporting `async ({ page, expect, pluginName, displayName, baseURL }) => {…}`, which the
+devkit lifecycle runs against the **live authenticated A0 page** right after install. It MUST
+assert a plugin-specific observable effect over the wire (e.g. its injected element is visible),
+and the screenshot it produces (`behaviour.png`) is the DEC-051 media source. The bash
+`verify-installed` hook (DEC-026/Appendix E.4) remains for container/API checks; a plugin uses
+whichever fits (UI → `behaviour.mjs`; backend/API → hook), and **at least one** MUST carry a
+falsifiable behaviour assertion (REQ-BEH-001). Absent both, the lifecycle logs the gap (a future
+conformance check can require ≥1). The lifecycle re-opens the Plugins modal after the seam so a
+behaviour that navigates can't break uninstall. _Implemented: devkit `6da09130`; validated on the
+sample-e2e self-test. Contract in Appendix E.11._
+
 ### Cycle-2 review closures (SPEC-REVIEW-002, 2026-06-20)
 
 25 findings (3 Critical · 7 Major · 5 Minor · 6 Gap · 4 XCut). Disposition:
@@ -1124,6 +1138,21 @@ Fixed headings, in order; prose is plugin-specific. `make conformance` checks pr
   artifacts and committed/refreshed at the known path.
 - **README embed:** the §E.8 "See it" section references these paths.
 - _Tooling/format/size budget: Q-026._
+
+### E.11 — Behaviour seam contract (per DEC-056)
+
+- **File:** `tests/e2e/behaviour.mjs` (consumer repo root). Absent ⇒ lifecycle logs the
+  missing-behaviour gap and continues.
+- **Shape:** `export default async function ({ page, expect, pluginName, displayName, baseURL }) {…}`.
+  Throw to fail the gate. Do **not** `import "@playwright/test"` inside the file — `page`/`expect`
+  are injected (the consumer path can't resolve it from the bind mount).
+- **Context:** `page` is the live, authenticated A0 Playwright page (the plugin is installed);
+  `baseURL` e.g. `http://localhost:80`. The seam runs right after install; the lifecycle re-opens
+  the Plugins modal afterwards, so the function MAY navigate/interact freely.
+- **Must:** assert ≥1 plugin-specific observable effect over the wire (e.g.
+  `await page.goto(baseURL + "/"); await expect(page.locator("#injected")).toBeVisible()`).
+- **Media:** the lifecycle screenshots the post-seam page to `A0_REPORT_DIR/behaviour.png`
+  (DEC-051 source).
 
 ---
 
