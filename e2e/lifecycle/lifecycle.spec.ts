@@ -132,6 +132,11 @@ test(`lifecycle [${CASE_NAME}]: install → verify-installed → uninstall → v
   // and assert a plugin-specific effect; also captures the DEC-051 media.
   await runBehaviour(pluginsPage.page);
 
+  // The behaviour seam may have navigated/interacted, leaving the Plugins modal
+  // closed; re-open it so uninstall's isInstalled()/card lookups resolve (they
+  // assume the modal is open — otherwise uninstall silently no-ops).
+  await pluginsPage.open();
+
   // uninstall
   await pluginsPage.uninstall(DISPLAY!);
   expect(await pluginsPage.isInstalled(DISPLAY!)).toBe(false);
