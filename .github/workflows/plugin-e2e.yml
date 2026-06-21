@@ -137,6 +137,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
+          chmod 777 "$GITHUB_WORKSPACE/artifacts"   # rootless-podman maps the container user to a subuid; 777 lets it write
           # Exclude the standardization wrapper + repo meta so root-layout
           # plugins (.devkit.yml plugin_dir: .) don't pack .git, the devkit
           # submodule (tests/_testkit), caller workflows, etc. into the zip.

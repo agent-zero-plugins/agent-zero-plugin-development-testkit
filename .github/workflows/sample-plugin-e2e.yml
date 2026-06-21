@@ -42,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
+          chmod 777 "$GITHUB_WORKSPACE/artifacts"   # rootless-podman maps the container user to a subuid; 777 lets it write
           ( cd examples/sample-plugin && zip -qr "$GITHUB_WORKSPACE/dist/sample_plugin.zip" . -x 'tests/*' )
           podman run --rm \
             --device /dev/fuse \
