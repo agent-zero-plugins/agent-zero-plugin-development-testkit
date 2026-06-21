@@ -126,13 +126,16 @@ export class PluginsPage {
       await this.topNavButton.click({ timeout: 8_000 });
     } catch {
       await dismissFirstRunModals(this.page);
-      await this.page.evaluate(() =>
+      // Fire-and-forget: openModal() is async and its promise can hang (e.g. the
+      // onboarding modal re-opening with no LLM key). Never await it — invoke and
+      // return immediately, then gate on the panel actually appearing below.
+      await this.page.evaluate(() => {
         (globalThis as { openModal?: (p: string) => void }).openModal?.(
           "components/plugins/list/plugin-list.html",
-        ),
-      );
+        );
+      });
     }
-    await expect(this.customTab).toBeVisible();
+    await expect(this.customTab).toBeVisible({ timeout: 20_000 });
   }
 
   /** Close the Plugins panel (× button in its header). Safe if already closed. */

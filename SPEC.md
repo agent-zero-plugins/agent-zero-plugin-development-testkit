@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -879,6 +879,18 @@ untested case. A run is reviewed by its **log body**, not just its conclusion: t
 `probe disabled` appears, and each group logs a `[coverage] <group>: asserted=N skipped=M` tally.
 _Implemented: devkit `a0-up.sh`/`run-lifecycle.sh`/`plugin-e2e.yml`; validated on context-scoping
 (probe ON → backend layer asserts for real)._
+
+**DEC-058 — Behaviour groups run on `loggedInPage`, not `pluginsPage`; `openModal` is
+fire-and-forget.** _Refines DEC-056; added 2026-06-21 after a behaviour group hung 300s in
+fixture setup._ With no LLM key configured (the LLM-less e2e posture), A0's `_onboarding` modal
+re-opens on every page load. The `pluginsPage` fixture eagerly `open()`s the Plugins panel, and
+that `openModal()` fallback — being `await`ed — can hang for the whole test timeout when the
+onboarding modal interferes. Two fixes: (a) per-group behaviour tests take the `loggedInPage`
+fixture (they each `page.goto("/")` and never use the Plugins panel — opening it was wasted work;
+the plugin stays installed as backend state regardless); (b) `PluginsPage.open()`'s `openModal`
+fallback is **fire-and-forget** (invoke, don't await its promise) and gates on the panel's tab
+becoming visible. Only the install/uninstall lifecycle tests still take `pluginsPage`. _Implemented:
+devkit `lifecycle.spec.ts` + `PluginsPage.ts`._
 
 ### Cycle-2 review closures (SPEC-REVIEW-002, 2026-06-20)
 
