@@ -14,6 +14,9 @@
 import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+
+import type { Page } from "@playwright/test";
 
 import { test, expect } from "./fixtures";
 
@@ -22,7 +25,9 @@ const DISPLAY = process.env.PLUGIN_DISPLAY_NAME;
 const PLUGIN_NAME = process.env.PLUGIN_NAME; // on-disk dir name (plugin.yaml `name`)
 const A0_CONTAINER = process.env.A0_CONTAINER ?? "a0-lifecycle";
 const HOOK_DIR = process.env.HOOK_DIR; // dir holding verify-installed / verify-uninstalled
+const BEHAVIOUR_FILE = process.env.BEHAVIOUR_FILE; // tests/e2e/behaviour.mjs (DEC-053 in-browser seam)
 const CASE_NAME = process.env.CASE_NAME ?? "default";
+const REPORT_DIR = process.env.A0_REPORT_DIR ?? "/tmp";
 
 test.beforeAll(() => {
   for (const [k, v] of Object.entries({ PLUGIN_ZIP: ZIP, PLUGIN_DISPLAY_NAME: DISPLAY, PLUGIN_NAME }))
@@ -82,6 +87,32 @@ function runHook(name: string): void {
   });
 }
 
+/**
+ * In-browser behaviour seam (SPEC DEC-053): a plugin ships
+ * `tests/e2e/behaviour.mjs` default-exporting `async ({ page, expect,
+ * pluginName, displayName, baseURL }) => {…}`. It drives the LIVE authenticated
+ * A0 page and asserts a plugin-specific observable effect — the falsifiable,
+ * over-the-wire behaviour check (vs the bash hook's container/API checks). It
+ * also produces `behaviour.png` (the DEC-051 media source). Absent file ⇒ skip
+ * (logged, so the missing-behaviour-test gap is visible).
+ */
+async function runBehaviour(page: Page): Promise<void> {
+  if (!BEHAVIOUR_FILE) {
+    console.log(`::warning::no behaviour.mjs for ${PLUGIN_NAME} — install-only coverage (DEC-053 gap)`);
+    return;
+  }
+  if (!fs.existsSync(BEHAVIOUR_FILE)) throw new Error(`BEHAVIOUR_FILE not found: ${BEHAVIOUR_FILE}`);
+  const mod = await import(pathToFileURL(BEHAVIOUR_FILE).href);
+  const fn = mod.default ?? mod.behaviour;
+  if (typeof fn !== "function") throw new Error(`${BEHAVIOUR_FILE} must default-export an async function`);
+  await fn({ page, expect, pluginName: PLUGIN_NAME, displayName: DISPLAY, baseURL: process.env.A0_BASE_URL });
+  try {
+    await page.screenshot({ path: path.join(REPORT_DIR, "behaviour.png") });
+  } catch (e) {
+    console.log("behaviour screenshot failed:", String(e));
+  }
+}
+
 test(`lifecycle [${CASE_NAME}]: install → verify-installed → uninstall → verify-uninstalled`, async ({
   pluginsPage,
 }) => {
@@ -97,6 +128,14 @@ test(`lifecycle [${CASE_NAME}]: install → verify-installed → uninstall → v
   expect(inA0ok(`test -d /a0/usr/plugins/${PLUGIN_NAME} && test -f /a0/usr/plugins/${PLUGIN_NAME}/plugin.yaml`)).toBe(true);
   // verify-installed — per-plugin hook (variant step).
   runHook("verify-installed");
+  // verify-installed — in-browser behaviour seam (DEC-053): drive the live UI
+  // and assert a plugin-specific effect; also captures the DEC-051 media.
+  await runBehaviour(pluginsPage.page);
+
+  // The behaviour seam may have navigated/interacted, leaving the Plugins modal
+  // closed; re-open it so uninstall's isInstalled()/card lookups resolve (they
+  // assume the modal is open — otherwise uninstall silently no-ops).
+  await pluginsPage.open();
 
   // uninstall
   await pluginsPage.uninstall(DISPLAY!);

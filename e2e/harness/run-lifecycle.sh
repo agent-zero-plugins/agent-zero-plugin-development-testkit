@@ -45,6 +45,7 @@ ln -sfn "$(npm root -g)" "$WORK/node_modules"
 # plugin name, the live container name, and where the plugin's hooks live.
 export PLUGIN_ZIP PLUGIN_DISPLAY_NAME PLUGIN_NAME A0_CONTAINER CASE_NAME
 export HOOK_DIR="${HOOK_DIR:-}"
+export BEHAVIOUR_FILE="${BEHAVIOUR_FILE:-}"   # DEC-053 in-browser behaviour seam
 ( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts )
 
 # verify-uninstalled (fs layer, DEC-029): assert the PLUGIN'S OWN dir is gone —

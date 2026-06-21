@@ -53,6 +53,7 @@ jobs:
             -e PLUGIN_DISPLAY_NAME="Sample Plugin" \
             -e PLUGIN_NAME=sample_plugin \
             -e HOOK_DIR=/workspace/examples/sample-plugin/tests/e2e/hooks \
+            -e BEHAVIOUR_FILE=/workspace/examples/sample-plugin/tests/e2e/behaviour.mjs \
             -e A0_IMAGE="ghcr.io/nuevanext/agent-zero:latest-nonroot" \
             -e GHCR_USER=x \
             -e GHCR_TOKEN="$GHCR_TOKEN" \

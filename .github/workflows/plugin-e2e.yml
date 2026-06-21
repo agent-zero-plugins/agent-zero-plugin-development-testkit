@@ -145,6 +145,10 @@ jobs:
               -x '.git/*' 'tests/*' '.github/*' '.skills/*' 'dist/*' '*/node_modules/*' \
                  '.devkit.yml' '.gitmodules' '.gitignore' )
           HOOK_DIR_REL="tests/e2e/hooks"
+          # DEC-053 in-browser behaviour seam — pass it only if the consumer
+          # ships one (set-but-missing throws; unset ⇒ the spec logs the gap).
+          BEHAVIOUR_REL="tests/e2e/behaviour.mjs"
+          if [ -f "$BEHAVIOUR_REL" ]; then BEHAVIOUR_ARG="/workspace/$BEHAVIOUR_REL"; else BEHAVIOUR_ARG=""; fi
           podman run --rm \
             --device /dev/fuse \
             --security-opt label=disable \
@@ -158,5 +162,6 @@ jobs:
             -e PLUGIN_DISPLAY_NAME="$DISPLAY_NAME" \
             -e PLUGIN_NAME="$PLUGIN_NAME" \
             -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
+            -e BEHAVIOUR_FILE="$BEHAVIOUR_ARG" \
             plugin-devkit:ci \
             -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'
