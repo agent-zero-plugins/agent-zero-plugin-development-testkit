@@ -9,7 +9,7 @@
 # Writes an instance env file (A0_BASE_URL/creds/container) for the harness.
 set -euo pipefail
 
-A0_IMAGE="${A0_IMAGE:-docker.io/agent0ai/agent-zero:latest}"   # DEC-019 parameter
+A0_IMAGE="${A0_IMAGE:-ghcr.io/nuevanext/agent-zero:latest-nonroot}"   # DEC-055 fork-first default
 A0_NAME="${A0_NAME:-a0-lifecycle}"
 A0_HTTP_PORT="${A0_HTTP_PORT:-80}"
 AUTH_LOGIN="${AUTH_LOGIN:-admin}"
