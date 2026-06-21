@@ -31,6 +31,9 @@ on:
       SKILLS_SYNC_APP_PRIVATE_KEY:
         description: "Sync App private-key PEM."
         required: true
+      GHCR_PULL_TOKEN:
+        description: "ghcr read:packages token to pull the private fork image (DEC-055). Optional — without it the e2e runs on the public default image."
+        required: false
 
 jobs:
   e2e:
@@ -106,6 +109,18 @@ jobs:
           echo "a0_image=$a0_image"           >> "$GITHUB_OUTPUT"
           echo "Resolved: dir=$plugin_dir name=$plugin_name display='$display_name' a0=$a0_image"
 
+      - name: Free disk space
+        # The fork image (ghcr.io/nuevanext/agent-zero, bundles ML deps e.g.
+        # onnxruntime) is larger than upstream's 8.76GB and exhausts the runner
+        # disk during the nested unpack. Reclaim ~30GB of preinstalled tooling.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                      /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "after reclaim:"; df -h / | tail -1
+
       - name: Build devkit devcontainer (rootless)
         env:
           DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
@@ -118,6 +133,7 @@ jobs:
           PLUGIN_NAME: ${{ steps.resolve.outputs.plugin_name }}
           DISPLAY_NAME: ${{ steps.resolve.outputs.display_name }}
           A0_IMAGE: ${{ steps.resolve.outputs.a0_image }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -136,6 +152,8 @@ jobs:
             -v "$GITHUB_WORKSPACE":/workspace:ro \
             -v "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip":/tmp/plugin.zip:ro \
             -e A0_IMAGE="$A0_IMAGE" \
+            -e GHCR_USER=x \
+            -e GHCR_TOKEN="$GHCR_TOKEN" \
             -e PLUGIN_ZIP=/tmp/plugin.zip \
             -e PLUGIN_DISPLAY_NAME="$DISPLAY_NAME" \
             -e PLUGIN_NAME="$PLUGIN_NAME" \
