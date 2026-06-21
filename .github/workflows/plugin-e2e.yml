@@ -146,10 +146,17 @@ jobs:
               -x '.git/*' 'tests/*' '.github/*' '.skills/*' 'dist/*' '*/node_modules/*' \
                  '.devkit.yml' '.gitmodules' '.gitignore' )
           HOOK_DIR_REL="tests/e2e/hooks"
-          # DEC-053 in-browser behaviour seam — pass it only if the consumer
-          # ships one (set-but-missing throws; unset ⇒ the spec logs the gap).
+          # Behaviour seam (DEC-053/056). Prefer ≤10 grouped specs under
+          # tests/e2e/specs/*.mjs (each runs as its own test → its own video);
+          # fall back to a single tests/e2e/behaviour.mjs. Absent ⇒ spec logs the gap.
           BEHAVIOUR_REL="tests/e2e/behaviour.mjs"
           if [ -f "$BEHAVIOUR_REL" ]; then BEHAVIOUR_ARG="/workspace/$BEHAVIOUR_REL"; else BEHAVIOUR_ARG=""; fi
+          SPECS_JSON="[]"
+          if ls tests/e2e/specs/*.mjs >/dev/null 2>&1; then
+            SPECS_JSON=$(for f in tests/e2e/specs/*.mjs; do
+              n=$(basename "$f" .mjs); printf '{"name":"%s","path":"/workspace/%s"}\n' "$n" "$f"; done \
+              | paste -sd, - | sed 's/^/[/; s/$/]/')
+          fi
           podman run --rm \
             --device /dev/fuse \
             --security-opt label=disable \
@@ -165,6 +172,7 @@ jobs:
             -e PLUGIN_NAME="$PLUGIN_NAME" \
             -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
             -e BEHAVIOUR_FILE="$BEHAVIOUR_ARG" \
+            -e BEHAVIOUR_SPECS="$SPECS_JSON" \
             -e ARTIFACT_DIR=/artifacts \
             plugin-devkit:ci \
             -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'
@@ -180,8 +188,8 @@ jobs:
           if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
           for webm in artifacts/*.webm; do
             base="${webm%.webm}"
-            ffmpeg -y -t 150 -i "$webm" -vf "fps=6,scale=1024:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
-            ffmpeg -y -t 150 -i "$webm" -i /tmp/pal.png -lavfi "fps=6,scale=1024:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
+            ffmpeg -y -i "$webm" -vf "fps=6,scale=1024:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
+            ffmpeg -y -i "$webm" -i /tmp/pal.png -lavfi "fps=6,scale=1024:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
             echo "GIF: $base.gif ($(du -h "$base.gif" 2>/dev/null | cut -f1))"
           done
           ls -la artifacts/ || true

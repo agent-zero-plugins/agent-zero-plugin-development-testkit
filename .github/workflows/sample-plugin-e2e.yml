@@ -72,8 +72,8 @@ jobs:
           if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
           for webm in artifacts/*.webm; do
             base="${webm%.webm}"
-            ffmpeg -y -t 150 -i "$webm" -vf "fps=6,scale=1024:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
-            ffmpeg -y -t 150 -i "$webm" -i /tmp/pal.png -lavfi "fps=6,scale=1024:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
+            ffmpeg -y -i "$webm" -vf "fps=6,scale=1024:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
+            ffmpeg -y -i "$webm" -i /tmp/pal.png -lavfi "fps=6,scale=1024:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
             echo "GIF: $base.gif ($(du -h "$base.gif" 2>/dev/null | cut -f1))"
           done
           ls -la artifacts/ || true
