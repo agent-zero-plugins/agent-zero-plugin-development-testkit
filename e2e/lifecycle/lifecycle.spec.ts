@@ -113,9 +113,15 @@ test.describe.serial(`lifecycle [${CASE_NAME}]`, () => {
   });
 
   // One test (one video) per behaviour group — drives the live authenticated UI.
+  // Use loggedInPage (NOT pluginsPage): each behaviour spec navigates fresh
+  // (page.goto("/")) and never uses the Plugins panel, so opening it in the
+  // fixture is wasted — and with no LLM key the onboarding modal re-opens on
+  // every load, so that wasted open() can hang the fixture's openModal fallback
+  // for the whole test timeout (DEC-058). The plugin stays installed as backend
+  // state regardless of which fixture the test takes.
   for (const spec of SPECS) {
-    test(`behaviour: ${spec.name}`, async ({ pluginsPage }) => {
-      const page = pluginsPage.page;
+    test(`behaviour: ${spec.name}`, async ({ loggedInPage }) => {
+      const page = loggedInPage;
       if (!fs.existsSync(spec.path)) throw new Error(`behaviour spec not found: ${spec.path}`);
       const mod = await import(pathToFileURL(spec.path).href);
       const fn = mod.default ?? mod.behaviour;
