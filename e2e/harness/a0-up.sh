@@ -21,6 +21,15 @@ log(){ printf '\033[1;36m[a0-up]\033[0m %s\n' "$*"; }
 
 podman rm -f "$A0_NAME" >/dev/null 2>&1 || true
 
+# Private-registry pull auth (DEC-055/Q-030): if ghcr creds are provided, log in
+# so a private fork image (ghcr.io/nuevanext/agent-zero) can be pulled. No creds
+# ⇒ skipped (public images need none).
+if [ -n "${GHCR_TOKEN:-}" ]; then
+  log "podman login ghcr.io (private fork-image pull)"
+  printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null 2>&1 \
+    || { echo "[a0-up] ghcr login failed (check GHCR_PULL_TOKEN: read:packages on NuevaNext)" >&2; exit 1; }
+fi
+
 log "booting $A0_IMAGE (nested, rootless, host-net) as '$A0_NAME'"
 podman run -d --name "$A0_NAME" --network=host \
   -e AUTH_LOGIN="$AUTH_LOGIN" -e AUTH_PASSWORD="$AUTH_PASSWORD" \
@@ -29,7 +38,13 @@ podman run -d --name "$A0_NAME" --network=host \
   bash -c 'set -e; mkdir -p /a0/usr;
     printf "AUTH_LOGIN=%s\nAUTH_PASSWORD=%s\n" "$AUTH_LOGIN" "$AUTH_PASSWORD" > /a0/usr/.env;
     printf "%s\n" "$A0_SEEDED_SETTINGS_JSON" > /a0/usr/settings.json;
-    printf "#!/bin/sh\nexec tail -f /dev/null\n" > /usr/sbin/sshd; chmod +x /usr/sbin/sshd;
+    # Neutralize sshd so A0s supervisor watchdog does not self-destruct on its
+    # rootless 255 exit (DEC-040). Best-effort: the root image lets us overwrite
+    # the binary; the non-root fork image rejects it (Permission denied) but
+    # already handles sshd via its non-root init, so we proceed either way.
+    if printf "#!/bin/sh\nexec tail -f /dev/null\n" > /usr/sbin/sshd 2>/dev/null; then
+      chmod +x /usr/sbin/sshd 2>/dev/null || true; echo "[a0] sshd neutralized";
+    else echo "[a0] /usr/sbin/sshd not writable (non-root image) — relying on image init"; fi;
     exec /exe/initialize.sh "$BRANCH"' >/dev/null
 
 log "waiting up to ${BOOT_TIMEOUT}s for /login ..."

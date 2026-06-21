@@ -19,10 +19,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        # The fork image (ghcr.io/nuevanext/agent-zero, bundles ML deps e.g.
+        # onnxruntime) is larger than upstream's 8.76GB and exhausts the runner
+        # disk during the nested unpack. Reclaim ~30GB of preinstalled tooling.
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                      /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "after reclaim:"; df -h / | tail -1
+
       - name: Build devcontainer (rootless)
         run: podman build -t plugin-devkit:ci -f devcontainer/Containerfile devcontainer
 
       - name: Package sample + run lifecycle (A0 nested, unprivileged)
+        # Validates DEC-055 fork-first: boots the PRIVATE non-root fork image
+        # (ghcr.io/nuevanext/agent-zero:latest-nonroot) via the harness ghcr login.
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -37,5 +53,8 @@ jobs:
             -e PLUGIN_DISPLAY_NAME="Sample Plugin" \
             -e PLUGIN_NAME=sample_plugin \
             -e HOOK_DIR=/workspace/examples/sample-plugin/tests/e2e/hooks \
+            -e A0_IMAGE="ghcr.io/nuevanext/agent-zero:latest-nonroot" \
+            -e GHCR_USER=x \
+            -e GHCR_TOKEN="$GHCR_TOKEN" \
             plugin-devkit:ci \
             -lc 'bash /workspace/e2e/harness/run-lifecycle.sh'
