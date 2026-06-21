@@ -8,7 +8,9 @@
 # (.devkit.yml `plugin_dir` → else canonical usr/plugins/<name>), so this
 # template is identical across all repos.
 #
-# Needs the shared sync-App secrets to clone the private devkit submodule.
+# Needs the shared sync-App secrets to clone the private devkit submodule, and
+# (DEC-055) GHCR_PULL_TOKEN to pull the private fork image. `secrets: inherit`
+# forwards all repo secrets, so new shared secrets need no caller change.
 name: plugin-e2e
 
 on:
@@ -19,6 +21,4 @@ on:
 jobs:
   e2e:
     uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
-    secrets:
-      SKILLS_SYNC_APP_CLIENT_ID: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
-      SKILLS_SYNC_APP_PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+    secrets: inherit
