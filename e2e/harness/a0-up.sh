@@ -38,7 +38,13 @@ podman run -d --name "$A0_NAME" --network=host \
   bash -c 'set -e; mkdir -p /a0/usr;
     printf "AUTH_LOGIN=%s\nAUTH_PASSWORD=%s\n" "$AUTH_LOGIN" "$AUTH_PASSWORD" > /a0/usr/.env;
     printf "%s\n" "$A0_SEEDED_SETTINGS_JSON" > /a0/usr/settings.json;
-    printf "#!/bin/sh\nexec tail -f /dev/null\n" > /usr/sbin/sshd; chmod +x /usr/sbin/sshd;
+    # Neutralize sshd so A0s supervisor watchdog does not self-destruct on its
+    # rootless 255 exit (DEC-040). Best-effort: the root image lets us overwrite
+    # the binary; the non-root fork image rejects it (Permission denied) but
+    # already handles sshd via its non-root init, so we proceed either way.
+    if printf "#!/bin/sh\nexec tail -f /dev/null\n" > /usr/sbin/sshd 2>/dev/null; then
+      chmod +x /usr/sbin/sshd 2>/dev/null || true; echo "[a0] sshd neutralized";
+    else echo "[a0] /usr/sbin/sshd not writable (non-root image) — relying on image init"; fi;
     exec /exe/initialize.sh "$BRANCH"' >/dev/null
 
 log "waiting up to ${BOOT_TIMEOUT}s for /login ..."
