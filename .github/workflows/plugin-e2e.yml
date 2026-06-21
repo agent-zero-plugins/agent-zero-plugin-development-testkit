@@ -18,7 +18,7 @@ on:
         description: "A0 image under test (overridden by .devkit.yml a0_image)."
         required: false
         type: string
-        default: "docker.io/agent0ai/agent-zero:latest"
+        default: "ghcr.io/nuevanext/agent-zero:latest-nonroot"
       devkit-submodule-path:
         description: "Path to the vendored devkit submodule."
         required: false
