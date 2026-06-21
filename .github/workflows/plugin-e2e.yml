@@ -136,7 +136,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
           # Exclude the standardization wrapper + repo meta so root-layout
           # plugins (.devkit.yml plugin_dir: .) don't pack .git, the devkit
           # submodule (tests/_testkit), caller workflows, etc. into the zip.
@@ -155,6 +155,7 @@ jobs:
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -v "$GITHUB_WORKSPACE":/workspace:ro \
             -v "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip":/tmp/plugin.zip:ro \
+            -v "$GITHUB_WORKSPACE/artifacts":/artifacts:rw \
             -e A0_IMAGE="$A0_IMAGE" \
             -e GHCR_USER=x \
             -e GHCR_TOKEN="$GHCR_TOKEN" \
@@ -163,5 +164,32 @@ jobs:
             -e PLUGIN_NAME="$PLUGIN_NAME" \
             -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
             -e BEHAVIOUR_FILE="$BEHAVIOUR_ARG" \
+            -e ARTIFACT_DIR=/artifacts \
             plugin-devkit:ci \
             -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'
+
+      - name: Convert lifecycle video → GIF + upload recording artifact
+        if: always()
+        env:
+          PLUGIN_NAME: ${{ steps.resolve.outputs.plugin_name }}
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          sudo chown -R "$USER" artifacts 2>/dev/null || true
+          if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
+          for webm in artifacts/*.webm; do
+            base="${webm%.webm}"
+            ffmpeg -y -i "$webm" -vf "fps=10,scale=1280:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
+            ffmpeg -y -i "$webm" -i /tmp/pal.png -lavfi "fps=10,scale=1280:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
+            echo "GIF: $base.gif ($(du -h "$base.gif" 2>/dev/null | cut -f1))"
+          done
+          ls -la artifacts/ || true
+
+      - name: Upload e2e recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-recording-${{ steps.resolve.outputs.plugin_name }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

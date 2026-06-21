@@ -41,7 +41,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
           ( cd examples/sample-plugin && zip -qr "$GITHUB_WORKSPACE/dist/sample_plugin.zip" . -x 'tests/*' )
           podman run --rm \
             --device /dev/fuse \
@@ -49,6 +49,7 @@ jobs:
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
             -v "$GITHUB_WORKSPACE":/workspace:ro \
             -v "$GITHUB_WORKSPACE/dist/sample_plugin.zip":/tmp/plugin.zip:ro \
+            -v "$GITHUB_WORKSPACE/artifacts":/artifacts:rw \
             -e PLUGIN_ZIP=/tmp/plugin.zip \
             -e PLUGIN_DISPLAY_NAME="Sample Plugin" \
             -e PLUGIN_NAME=sample_plugin \
@@ -57,5 +58,30 @@ jobs:
             -e A0_IMAGE="ghcr.io/nuevanext/agent-zero:latest-nonroot" \
             -e GHCR_USER=x \
             -e GHCR_TOKEN="$GHCR_TOKEN" \
+            -e ARTIFACT_DIR=/artifacts \
             plugin-devkit:ci \
             -lc 'bash /workspace/e2e/harness/run-lifecycle.sh'
+
+      - name: Convert lifecycle video → GIF + upload recording
+        if: always()
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          sudo chown -R "$USER" artifacts 2>/dev/null || true
+          if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
+          for webm in artifacts/*.webm; do
+            base="${webm%.webm}"
+            ffmpeg -y -i "$webm" -vf "fps=10,scale=1280:-1:flags=lanczos,palettegen" /tmp/pal.png 2>/dev/null || continue
+            ffmpeg -y -i "$webm" -i /tmp/pal.png -lavfi "fps=10,scale=1280:-1:flags=lanczos[x];[x][1:v]paletteuse" "$base.gif" 2>/dev/null || true
+            echo "GIF: $base.gif ($(du -h "$base.gif" 2>/dev/null | cut -f1))"
+          done
+          ls -la artifacts/ || true
+
+      - name: Upload e2e recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-recording-sample
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

@@ -46,7 +46,23 @@ ln -sfn "$(npm root -g)" "$WORK/node_modules"
 export PLUGIN_ZIP PLUGIN_DISPLAY_NAME PLUGIN_NAME A0_CONTAINER CASE_NAME
 export HOOK_DIR="${HOOK_DIR:-}"
 export BEHAVIOUR_FILE="${BEHAVIOUR_FILE:-}"   # DEC-053 in-browser behaviour seam
-( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts )
+
+PW_RC=0
+( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
+
+# Collect e2e media (the full-lifecycle video + screenshots) to the writable
+# artifact mount, even on failure (a failing run's video is the most useful), so
+# the workflow can GIF-convert + upload them as build artifacts.
+if [ -n "${ARTIFACT_DIR:-}" ]; then
+  mkdir -p "$ARTIFACT_DIR"
+  n=0
+  while IFS= read -r f; do cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-lifecycle.webm" && n=$((n+1)); done \
+    < <(find "$WORK/lifecycle/test-results" -name '*.webm' 2>/dev/null | head -1)
+  find "$WORK/lifecycle/test-results" -name '*.png' -exec cp {} "$ARTIFACT_DIR/" \; 2>/dev/null || true
+  cp "${A0_REPORT_DIR:-/tmp}/behaviour.png" "$ARTIFACT_DIR/${PLUGIN_NAME}-behaviour.png" 2>/dev/null || true
+  echo "[run-lifecycle] copied $(ls "$ARTIFACT_DIR" 2>/dev/null | wc -l) media file(s) to ARTIFACT_DIR ($n video)"
+fi
+exit $PW_RC
 
 # verify-uninstalled (fs layer, DEC-029): assert the PLUGIN'S OWN dir is gone —
 # NOT that /a0/usr/plugins is byte-identical to a baseline. A0 lazily
