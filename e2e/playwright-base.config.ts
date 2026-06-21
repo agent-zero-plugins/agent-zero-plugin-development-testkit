@@ -50,8 +50,11 @@ export function baseConfig(
     use: {
       baseURL: BASE_URL,
       trace: "retain-on-failure",
-      screenshot: "only-on-failure",
-      video: "retain-on-failure",
+      screenshot: "on",
+      // Always record the full lifecycle at a legible resolution so every run
+      // produces a video build-artifact (the reviewable e2e flow + DEC-051 media).
+      video: { mode: "on", size: { width: 1280, height: 720 } },
+      viewport: { width: 1280, height: 720 },
       actionTimeout: 15_000,
       navigationTimeout: 20_000,
     },
