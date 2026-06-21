@@ -19,6 +19,23 @@ INSTANCE_ENV="${INSTANCE_ENV:-/tmp/a0-instance.env}"
 
 log(){ printf '\033[1;36m[a0-up]\033[0m %s\n' "$*"; }
 
+# Plugin-declared extra env to forward INTO the nested A0 pod (DEC-057). A plugin
+# whose behaviour sits behind an env-gated test seam (e.g. a deterministic probe
+# gated by FOO_TEST_PROBE=1, kept off in prod) declares it in .devkit.yml
+# `e2e_pod_env:`; the reusable workflow flattens that to A0_POD_ENV, a
+# whitespace/newline-separated list of KEY=VAL entries. We turn each into a
+# `-e KEY=VAL` flag so the seam is enabled for e2e ONLY.
+POD_ENV_ARGS=()
+if [ -n "${A0_POD_ENV:-}" ]; then
+  while IFS= read -r kv; do
+    [ -z "$kv" ] && continue
+    case "$kv" in
+      *=*) POD_ENV_ARGS+=( -e "$kv" ); log "pod-env: ${kv%%=*} (forwarded to nested A0)";;
+      *) echo "[a0-up] ignoring malformed A0_POD_ENV entry (no '='): $kv" >&2;;
+    esac
+  done < <(printf '%s\n' $A0_POD_ENV)
+fi
+
 podman rm -f "$A0_NAME" >/dev/null 2>&1 || true
 
 # Private-registry pull auth (DEC-055/Q-030): if ghcr creds are provided, log in
@@ -34,6 +51,7 @@ log "booting $A0_IMAGE (nested, rootless, host-net) as '$A0_NAME'"
 podman run -d --name "$A0_NAME" --network=host \
   -e AUTH_LOGIN="$AUTH_LOGIN" -e AUTH_PASSWORD="$AUTH_PASSWORD" \
   -e A0_SEEDED_SETTINGS_JSON='{}' -e BRANCH=main \
+  ${POD_ENV_ARGS[@]+"${POD_ENV_ARGS[@]}"} \
   "$A0_IMAGE" \
   bash -c 'set -e; mkdir -p /a0/usr;
     printf "AUTH_LOGIN=%s\nAUTH_PASSWORD=%s\n" "$AUTH_LOGIN" "$AUTH_PASSWORD" > /a0/usr/.env;

@@ -47,6 +47,7 @@ export PLUGIN_ZIP PLUGIN_DISPLAY_NAME PLUGIN_NAME A0_CONTAINER CASE_NAME
 export HOOK_DIR="${HOOK_DIR:-}"
 export BEHAVIOUR_FILE="${BEHAVIOUR_FILE:-}"     # legacy single-seam (DEC-053)
 export BEHAVIOUR_SPECS="${BEHAVIOUR_SPECS:-}"   # ≤10 grouped specs (DEC-056), JSON [{name,path}]
+export A0_POD_ENV="${A0_POD_ENV:-}"             # plugin-declared nested-A0 env (DEC-057), KEY=VAL list
 
 PW_RC=0
 ( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?

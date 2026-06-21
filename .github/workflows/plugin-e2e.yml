@@ -103,11 +103,34 @@ jobs:
           [ -n "$display_name" ] || display_name=$(y title "$plugin_dir/plugin.yaml")
           [ -n "$display_name" ] || display_name="$plugin_name"
           a0_image="${cfg_a0:-$INPUT_A0_IMAGE}"
+          # Optional plugin-declared nested-A0 env (DEC-057). Natural YAML map:
+          #   e2e_pod_env:
+          #     A0_FOO_TEST_PROBE: "1"
+          # flattened to a space-separated KEY=VAL list the harness forwards as
+          # `-e KEY=VAL` into the nested A0 pod. Enables env-gated test seams for
+          # e2e ONLY (the seam stays off in prod). Also accepts an inline scalar
+          # `e2e_pod_env: "A=1 B=2"`.
+          pod_env=""
+          if [ -f .devkit.yml ]; then
+            pod_env=$(y e2e_pod_env .devkit.yml)
+            if [ -z "$pod_env" ]; then
+              pod_env=$(awk '
+                /^e2e_pod_env:[[:space:]]*$/ {inblk=1; next}
+                inblk && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:/ {
+                  l=$0; sub(/^[[:space:]]+/,"",l)
+                  k=l; sub(/:.*/,"",k)
+                  v=l; sub(/^[^:]*:[[:space:]]*/,"",v); gsub(/^["'\'']|["'\'']$/,"",v)
+                  printf "%s=%s ", k, v; next }
+                inblk && /^[^[:space:]]/ {inblk=0}
+              ' .devkit.yml)
+            fi
+          fi
           echo "plugin_dir=$plugin_dir"       >> "$GITHUB_OUTPUT"
           echo "plugin_name=$plugin_name"     >> "$GITHUB_OUTPUT"
           echo "display_name=$display_name"   >> "$GITHUB_OUTPUT"
           echo "a0_image=$a0_image"           >> "$GITHUB_OUTPUT"
-          echo "Resolved: dir=$plugin_dir name=$plugin_name display='$display_name' a0=$a0_image"
+          echo "pod_env=$pod_env"             >> "$GITHUB_OUTPUT"
+          echo "Resolved: dir=$plugin_dir name=$plugin_name display='$display_name' a0=$a0_image pod_env='$pod_env'"
 
       - name: Free disk space
         # The fork image (ghcr.io/nuevanext/agent-zero, bundles ML deps e.g.
@@ -133,6 +156,7 @@ jobs:
           PLUGIN_NAME: ${{ steps.resolve.outputs.plugin_name }}
           DISPLAY_NAME: ${{ steps.resolve.outputs.display_name }}
           A0_IMAGE: ${{ steps.resolve.outputs.a0_image }}
+          A0_POD_ENV: ${{ steps.resolve.outputs.pod_env }}
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
@@ -173,6 +197,7 @@ jobs:
             -e HOOK_DIR="/workspace/$HOOK_DIR_REL" \
             -e BEHAVIOUR_FILE="$BEHAVIOUR_ARG" \
             -e BEHAVIOUR_SPECS="$SPECS_JSON" \
+            -e A0_POD_ENV="$A0_POD_ENV" \
             -e ARTIFACT_DIR=/artifacts \
             plugin-devkit:ci \
             -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'

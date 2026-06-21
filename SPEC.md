@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -861,6 +861,24 @@ falsifiable behaviour assertion (REQ-BEH-001). Absent both, the lifecycle logs t
 conformance check can require ≥1). The lifecycle re-opens the Plugins modal after the seam so a
 behaviour that navigates can't break uninstall. _Implemented: devkit `6da09130`; validated on the
 sample-e2e self-test. Contract in Appendix E.11._
+
+**DEC-057 — Plugin-declared nested-A0 env (`e2e_pod_env`) + no-silent-swallow honesty rule.**
+_Refines DEC-053/056; added 2026-06-21 after the context-scoping pilot exposed hollow coverage._
+A plugin whose behaviour sits behind an **env-gated test seam** (a deterministic in-pod probe kept
+OFF in production, e.g. gated by `A0_<PLUGIN>_TEST_PROBE=1`) declares the enabling env in
+`.devkit.yml` `e2e_pod_env:` (a YAML map, or inline `"K=V K2=V2"`). The reusable workflow flattens
+it to `A0_POD_ENV` and the harness (`a0-up.sh`) forwards each entry as `-e KEY=VAL` into the nested
+A0 pod — so the seam is live for e2e **only**. This closes the trap the pilot hit: 34/65 behaviour
+cases were calling a disabled probe, erroring, and being **swallowed by best-effort `try/catch`** →
+the gate was green but verified nothing. Two coupled honesty requirements (REQ-BEH-002):
+(a) **best-effort `try/catch` is reserved for genuinely un-enableable env** (a real LLM agent turn,
+OS clipboard) — anything reachable via a declared `e2e_pod_env` seam MUST **hard-assert** so a
+disabled/broken seam goes RED; (b) **no fake green** — a behaviour case is either genuinely asserted
+(logs `✓`) or explicitly `SKIP(reason)` (visibly not-covered + tracked), never a bare `✓` for an
+untested case. A run is reviewed by its **log body**, not just its conclusion: the harness fails if
+`probe disabled` appears, and each group logs a `[coverage] <group>: asserted=N skipped=M` tally.
+_Implemented: devkit `a0-up.sh`/`run-lifecycle.sh`/`plugin-e2e.yml`; validated on context-scoping
+(probe ON → backend layer asserts for real)._
 
 ### Cycle-2 review closures (SPEC-REVIEW-002, 2026-06-20)
 
