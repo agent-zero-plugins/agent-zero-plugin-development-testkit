@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -242,6 +242,25 @@ _(REQs are added cluster-by-cluster as decisions are made.)_
 
 ---
 
+### 5.14 Spec-driven BDD e2e (SBE) — Cycle 3
+
+_The Cycle-2 behaviour seam (§5.13) proved hollow-prone: a quick `behaviour.mjs` reverse-engineered
+from code tends to test the implementation (selectors, store internals) and to pass without verifying.
+Cycle 3 replaces the ad-hoc behaviour test with a **spec-driven, behaviour-first BDD** method whose
+artifacts are durable, queryable, per-plugin documents, and whose common machinery ships from the
+devkit. See DEC-059…064 and Appendix E.12._
+
+| ID | Requirement | Trace | Impl |
+|---|---|---|---|
+| REQ-SBE-001 | Each plugin's e2e **MUST** be produced by the per-repo **spec-driven pipeline**: (1) reverse-engineer an after-the-fact **behaviour spec**; (2) an after-the-fact **implementation plan**; (3) a **BDD `.feature`** derived from the behaviour spec; (4) an **e2e steps spec** (test wiring). Each stage is authored + reviewed by a typed subagent (behaviour-spec author, impl-plan author, BDD author, QA-expert reviewer, BDD-expert reviewer). | DEC-059, DEC-060 | Doc, Process |
+| REQ-SBE-002 | The four documents are **living, plugin-specific** artifacts committed under `docs/spec/` of each plugin (`behaviour-spec.md`, `implementation-plan.md`, `e2e.feature.md`, `e2e-steps-spec.md`). They **MUST** contain **only that plugin's concerns** — no common lifecycle content. Docs #1/#3 are the behaviour face; #2 locks product internals; #4 locks test wiring (same depth, different concern). | DEC-060 | Repo |
+| REQ-SBE-003 | A `.feature` **MUST** assert **observable behaviour in domain language** and **MUST NOT** contain selectors, DOM ids, CSS classes, store/internal-API names, function-existence checks, or internal-state poking. The "how" (triggers, seams, selectors, probes) lives **only** in step definitions. Behaviours are provoked by **real actions**, not by setting internal flags. | DEC-061 | Repo |
+| REQ-SBE-004 | The `.feature` **MUST** obey the honesty hard-rules: real falsifiable assertions, no silent swallow (failure ⇒ RED, per-group `[coverage]` tally), no fake green (a case is asserted or an explicit `@skip` with a tracked reason), UI-driven self-provisioning fixtures, hermetic/LLM-less determinism, ≤10 grouped features (one webm each). | DEC-061, DEC-057 | Repo, Devkit |
+| REQ-SBE-005 | **Common lifecycle and BDD wiring are the devkit's responsibility, batteries-included** — the playwright-bdd runner/config, the shared step library, and the common lifecycle `.feature`(s)+steps (install / uninstall / boot / probe-enable / onboarding-suppression). Plugins **MUST** consume them by reference via the `tests/_testkit` submodule and **MUST NOT** copy them. A plugin's run **composes** devkit-common features+steps **+** the plugin's own behaviour `.feature` + plugin-specific steps. | DEC-062, DEC-063 | Devkit |
+| REQ-SBE-006 | Agent-driven behaviours (e.g. "the agent asks…") **MUST** be triggered by a **deterministic seam** that invokes the real handler without an LLM, so behaviour-true scenarios stay hermetic — extending the `dump_live` philosophy (DEC-057) from observation to **triggering**. A real LLM turn is used only when a behaviour is genuinely un-seamable. | DEC-064, DEC-057 | Repo, Devkit |
+
+---
+
 ## 6. Verification
 
 _(One row per REQ, added in lockstep.)_
@@ -306,6 +325,12 @@ _(One row per REQ, added in lockstep.)_
 | REQ-BEH-001 | Demonstration | The `verify-installed` hook drives real plugin behaviour in nested A0; stubbing the behaviour (not the files) fails it. |
 | REQ-BEH-002 | Inspection | The PR e2e includes the behaviour verify as a gating step. |
 | REQ-BEH-003 | Inspection | The media-capture flow and the behaviour verify reference the same scripted flow. |
+| REQ-SBE-001 | Inspection | The plugin's `docs/spec/` holds the four pipeline artifacts; commit history / authorship shows the staged subagent reviews (QA + BDD). |
+| REQ-SBE-002 | Inspection | The four docs exist under `docs/spec/`, are plugin-specific, and contain no common-lifecycle content (no install/uninstall scenarios). |
+| REQ-SBE-003 | Demonstration | A `.feature` grep finds no selectors/DOM-ids/CSS-classes/store-names/`showModal`-style flags in `Given/When/Then`; a BDD-expert review confirms declarative behaviour. |
+| REQ-SBE-004 | Demonstration | The run emits per-group `[coverage]` tallies; a deliberately-broken assertion turns the group RED; no `@skip` lacks a tracked reason. |
+| REQ-SBE-005 | Inspection | The plugin repo contains no copy of the common lifecycle features/steps or the runner config; they resolve from `tests/_testkit`; the run executes both common + plugin-specific groups. |
+| REQ-SBE-006 | Demonstration | The behaviour trigger runs with no LLM configured; disabling the seam (probe off) makes the triggered scenarios RED, not silently green. |
 
 ---
 
@@ -931,6 +956,57 @@ devkit `lifecycle.spec.ts` + `PluginsPage.ts`._
   publish step — `CLAUDE.md`/`docs/` are writable; workflows are not, per DEC-044). **XCut-3**
   (re-opened Cycle-1 closures) → closed via E.5 + E.1/DEC-047 corrections. **XCut-4** (vacuous
   acceptances) → addressed by the Critical/Major rewrites above.
+
+### Cycle-3 decisions (spec-driven BDD e2e, 2026-06-22)
+
+_Cycle 3 was driven from the context-scoping pilot (DEC-057/058) + the ask-user-question BDD review.
+It supersedes the ad-hoc `behaviour.mjs` (DEC-056) as the **authoring method** while keeping that
+seam as a low-effort fallback._
+
+**DEC-059 — Per-repo spec-driven e2e pipeline (multi-agent).** Each plugin's e2e is produced by a
+five-step pipeline, each step authored/reviewed by a **typed subagent** (the orchestration is the
+deliverable, not a one-shot): (1) reverse-engineer an after-the-fact **behaviour spec** + self-review
+(IEEE-29148); (2) an after-the-fact **implementation plan**; (3) a **BDD `.feature`** derived from the
+*behaviour* spec; (4) an **e2e steps spec** (test wiring); with a **QA-expert** review of coverage and
+a **BDD-expert** review of Gherkin craft folded in. _Validated: the context-scoping pilot caught real
+defects (hollow coverage, the zero-global migrate latch #21); the ask-user-question BDD-expert pass
+caught a hidden two-in-one scenario + Then/When inversion._ Skills project FROM this (the canonical
+subagent set, prompts, expected outputs, example findings) — see SKL.
+
+**DEC-060 — The 4-doc artifact model (living, per-plugin).** Each plugin commits four documents under
+`docs/spec/`: **behaviour-spec.md** (what it does — behaviour-first, reads like the BDD, not an impl
+plan), **implementation-plan.md** (how it's built — locks the *product's* low-level internals),
+**e2e.feature.md** (behaviour as executable spec), **e2e-steps-spec.md** (how the *tests* bind to the
+product — low-level: selectors, seams, probes). #2 and #4 are the **same depth, different concern**
+(product internals vs test wiring). All four are **plugin-specific** (DEC-062).
+
+**DEC-061 — Behaviour-first BDD + honesty hard-rules.** A `.feature` asserts **observable behaviour in
+domain language**; it MUST NOT contain selectors, DOM ids, CSS classes, store/internal-API names,
+function-existence checks, or internal-state poking — the "how" lives only in step definitions, and
+behaviours are provoked by **real actions** not internal flags. Plus the honesty rules (from DEC-057):
+no silent swallow (failure ⇒ RED + `[coverage]` tally), no fake green (assert or explicit tracked
+`@skip`), UI-driven self-provisioning fixtures, hermetic/LLM-less determinism, ≤10 grouped features
+(one webm each), best-effort `try/catch` reserved for genuinely un-enableable env. _Reverse-engineering
+from code biases toward implementation tests; sourcing the `.feature` from the behaviour spec (not the
+e2e/Playwright spec) is what keeps it behaviour-first._
+
+**DEC-062 — Plugin-specific vs common split.** Plugin repos hold **only their own behaviours** (the
+four docs, scoped to that plugin). **Common lifecycle is the devkit's responsibility** and is
+**linked, never duplicated** — no plugin re-states an install/uninstall/boot scenario or a common step.
+
+**DEC-063 — playwright-bdd execution layer, batteries-included from the devkit.** The devkit ships the
+playwright-bdd runner/config, the **shared step library**, and the **common lifecycle `.feature`(s) +
+steps** (install / uninstall / boot / probe-enable / onboarding-suppression). A plugin's run
+**composes** devkit-common features+steps **+** the plugin's own behaviour `.feature` + plugin-specific
+steps, consumed by reference through the `tests/_testkit` submodule. One nested-A0 boot; one webm per
+group; honest `[coverage]` tally. _Replaces the bespoke `lifecycle.spec.ts` multi-spec runner for
+Cycle-3 plugins; the DEC-056 `.mjs` seam remains a fallback for plugins not yet migrated._
+
+**DEC-064 — Deterministic behaviour triggers (seams).** Agent-driven behaviours ("the agent asks…")
+are triggered by a **deterministic seam** that invokes the real handler without an LLM — extending the
+`dump_live` philosophy (DEC-057) from *observation* to *triggering*. The seam is enabled for e2e only
+(`.devkit.yml e2e_pod_env`); a real LLM turn (deterministic stub) is used only when a behaviour is
+genuinely un-seamable. Keeps behaviour-true scenarios hermetic.
 
 ---
 
