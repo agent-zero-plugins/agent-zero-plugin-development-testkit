@@ -30,7 +30,7 @@ RUN dnf install -y \
       libXcomposite libXdamage libXext libXfixes libXrandr libXcursor libXi libXtst \
       libX11 libxcb mesa-libgbm pango cairo alsa-lib dbus-libs expat \
  && dnf clean all \
- && npm install -g "playwright@${PLAYWRIGHT_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}" \
+ && npm install -g "playwright@${PLAYWRIGHT_VERSION}" "@playwright/test@${PLAYWRIGHT_VERSION}" "playwright-bdd@^9.2.0" \
  && npx --yes "playwright@${PLAYWRIGHT_VERSION}" install chromium \
  && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH" \
  && echo "export NODE_PATH=$(npm root -g)" > /etc/profile.d/node_path.sh

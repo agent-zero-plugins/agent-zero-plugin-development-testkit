@@ -181,6 +181,11 @@ jobs:
               n=$(basename "$f" .mjs); printf '{"name":"%s","path":"/workspace/%s"}\n' "$n" "$f"; done \
               | paste -sd, - | sed 's/^/[/; s/$/]/')
           fi
+          # Cycle-3 (DEC-063): if the plugin ships BDD features, run the
+          # playwright-bdd harness; otherwise the classic .mjs lifecycle.
+          HARNESS=run-lifecycle.sh
+          if ls tests/e2e/features/*.feature >/dev/null 2>&1; then HARNESS=run-bdd.sh; fi
+          echo "harness: $HARNESS"
           podman run --rm \
             --device /dev/fuse \
             --security-opt label=disable \
@@ -199,8 +204,10 @@ jobs:
             -e BEHAVIOUR_SPECS="$SPECS_JSON" \
             -e A0_POD_ENV="$A0_POD_ENV" \
             -e ARTIFACT_DIR=/artifacts \
+            -e WORKSPACE=/workspace \
+            -e DEVKIT_PATH="$DEVKIT_PATH" \
             plugin-devkit:ci \
-            -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/run-lifecycle.sh'
+            -lc 'bash /workspace/'"$DEVKIT_PATH"'/e2e/harness/'"$HARNESS"
 
       - name: Convert lifecycle video → GIF + upload recording artifact
         if: always()
