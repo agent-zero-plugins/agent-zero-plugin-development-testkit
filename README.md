@@ -1,131 +1,211 @@
 # agent-zero-plugin-development-testkit
 
-Shared pytest scaffolding for Agent Zero plugin repos. Scrapes A0's own
-source at runtime for the canonical names a plugin can legally hook
-into — `<x-extension id>` surfaces, `callJsExtensions` hook names,
-`call_plugin_hook` lifecycle names, module attribute surfaces — and
-exposes them as fast pytest assertions so the "plugin installs but does
-nothing" / "plugin crashes on first HTTP hit" / "I called an A0 function
-that doesn't exist" class of bug fails at PR time, not after deploy.
+**The devkit: the single source of truth for how Agent Zero plugins are built, tested, documented,
+and shipped — and the shared machinery that enforces that standard across the whole plugin fleet.**
 
-First adopter (and origin of every assertion here): **[agent-zero-plugin-livekit](https://github.com/agent-zero-operator/agent-zero-plugin-livekit)**.
+Every plugin repo vendors this devkit as a submodule (`tests/_testkit`). The devkit gives a plugin,
+batteries-included: a reproducible dev container, three layers of automated tests, the reusable CI
+workflow that runs them on the real image we deploy, the authoring skills, and the documentation
+templates. A plugin author writes *their plugin's behaviour* — everything common comes from here.
 
-## What's in the box
+> **Start here:** the authoritative design is [`SPEC.md`](SPEC.md) (the numbered REQ/DEC contract).
+> This README is the readable map; the SPEC is the law.
 
-- **`discovery`** — `KNOWN_HTML_SURFACES`, `KNOWN_JS_HOOKS`, `KNOWN_PLUGIN_HOOKS`, `find_a0_root()`.
-- **`assertions`** — `assert_extension_at_surface`, `assert_js_at_hook`, `assert_no_stray_extension_folders`, `assert_no_dead_plugin_hooks`, `assert_plugin_has_thumbnail`, plus the positive/negative `assert_valid_*` primitives. Every failure message includes a `difflib` suggestion so typos surface as *"did you mean…?"*.
-- **`fakes`** — `FakeSettings`, `install_fake_a0_helpers`, `import_plugin_module`. Mirrors A0's real `helpers.settings` API (no fabricated `set_setting`) so unit tests can't pass against a lying fake.
-- **`real.fasta2a`** — `scripted_a2a_server(scripts, delays, default)` context manager yielding a live in-process FastA2A with a deterministic scripted worker. Real uvicorn, real HTTP, canned responses.
-- **`real.validator`** — `static_validate(plugin_dir)` → fast + deterministic manifest / structure / extension-point / security (committed-secret scan) checks. Pairs with `assert_validator_clean(report)`.
-- **`real.deps`** — `audit_dependencies(plugin_dir)` → AST-walks every plugin `.py`, cross-references third-party imports against A0's `requirements.txt` + the plugin's own declared deps, flags undeclared with `file:line`.
-- **`real.a0_api`** — `audit_a0_api_usage(plugin_dir)` → verifies every `helpers.settings.foo`-style attribute access in the plugin resolves to a real public name in A0's module source. Catches fabricated-API bugs that pass type checkers.
+---
 
-## How to use it in a consumer plugin repo
+## The two things this repo is
 
-1. **Add as a submodule** (we don't publish to PyPI — versioning is commit-pin):
-   ```bash
-   git submodule add https://github.com/agent-zero-operator/agent-zero-plugin-development-testkit .testkit
+1. **The standard** — [`SPEC.md`](SPEC.md): a spec-driven contract (100+ requirements, 65+ decisions,
+   two review rounds) describing everything a fleet plugin must satisfy: layout, CI, the Makefile
+   contract, lifecycle, docs, licensing, behaviour verification, and the behaviour-first BDD e2e method.
+   Authored via the `spec-driven-development` method; lives here so it's queryable, not in anyone's head.
+
+2. **The machinery that delivers it** — the devcontainer, the reusable GitHub Actions workflows, the
+   pytest assertion library, and the playwright e2e layers (lifecycle + BDD). Plugins consume these by
+   reference; they never copy them.
+
+---
+
+## Repository map
+
+| Path | What it is |
+|---|---|
+| `SPEC.md`, `SPEC-REVIEW-00*.md` | The standard + its two expert-review rounds. The canonical artifact. |
+| `devcontainer/` | The `Containerfile` for the reproducible build/test environment (Node + Playwright + playwright-bdd + podman-in-podman, used by CI and local dev). |
+| `.github/workflows/plugin-e2e.yml` | **The reusable e2e workflow** every plugin calls. Boots A0 nested + rootless, installs the plugin, runs the lifecycle **or** BDD suite on the fork image. |
+| `.github/workflows/devkit-sync.yml` | Nightly sync that keeps consumer repos' vendored copies current. |
+| `e2e/harness/` | Shell entrypoints run *inside* the devcontainer: `a0-up.sh`/`a0-down.sh` (boot/teardown a disposable nested A0), `run-lifecycle.sh` (classic lifecycle), **`run-bdd.sh`** (the playwright-bdd runner). |
+| `e2e/bdd/` | **Batteries-included BDD layer:** `playwright.config.ts` (composes devkit-common + the plugin's features/steps), `bdd-fixtures.ts` (the `playwright-bdd` base test + install/uninstall as an auto worker fixture), `features/` + `steps/` (the **common lifecycle** feature + steps). |
+| `e2e/lifecycle/` | The classic non-BDD lifecycle spec (install → verify → uninstall) for plugins that haven't adopted BDD yet. |
+| `e2e/fixtures/`, `e2e/pages/` | Shared Playwright fixtures (authenticated page, A0 login) and page objects (Login, Plugins panel). |
+| `src/a0_plugin_testkit/` | **The pytest assertion library** — fast static checks (extension-point names, hooks, declared deps, real-A0-API usage, manifest/security validation). Catches the "installs but does nothing / crashes on first hit / calls a non-existent A0 API" bug class at PR time. |
+| `docs/` | `a0-compatibility.md` (the upstream-vs-fork analysis), `ADOPTING.md` (consumer onboarding). |
+| `skills/` | The vendored authoring skills + common Claude/Copilot guidelines distributed to plugin repos. |
+| `templates/`, `examples/` | README/CLAUDE templates and a worked sample. |
+
+---
+
+## The three test layers
+
+A fleet plugin is gated by three complementary layers, fastest-first:
+
+1. **Static pytest assertions** (`src/a0_plugin_testkit`, ~1s, no A0 boot).
+   Scrapes A0's *own source* for the canonical names a plugin may hook into and asserts the plugin
+   only uses real ones — invalid extension surface, undeclared third-party import, dead lifecycle hook,
+   fabricated A0 API call, blank thumbnail, manifest/security issues. Red-first: every assertion was
+   written against a real shipped bug.
+
+2. **Lifecycle e2e** (`e2e/lifecycle` via `run-lifecycle.sh`).
+   Boots a real nested A0, installs the plugin from its zip, asserts it's installed + listed, then
+   uninstalls and asserts no residue. Plus an in-browser **behaviour hook** (`tests/e2e/behaviour.mjs`)
+   that drives the live UI right after install.
+
+3. **Behaviour-first BDD e2e** (`e2e/bdd` via `run-bdd.sh`) — **the current standard (Cycle 3).**
+   Plain-language `.feature` scenarios executed by `playwright-bdd` against a live nested A0. This is
+   what the rest of this README focuses on.
+
+The reusable workflow **auto-selects** layer 2 vs 3: if a plugin ships `tests/e2e/features/`, CI runs
+`run-bdd.sh`; otherwise it runs the classic `run-lifecycle.sh`. No per-plugin wiring beyond that.
+
+---
+
+## The behaviour-first BDD method (Cycle 3)
+
+The goal: **test what the plugin promises a user, in language a human can read, against the real
+deployed image — with no fake passes.** (SPEC §5.14, DEC-059–065; method skill: `a0-plugin-e2e-bdd`.)
+
+### Four living documents per plugin (`docs/spec/`)
+
+| Doc | Concern |
+|---|---|
+| `behaviour-spec.md` | What the plugin does, behaviour-first (reads like the BDD). |
+| `implementation-plan.md` | How the product is built internally (components, fork seams, config). |
+| `e2e.feature.md` | The BDD behaviour contract (the source the `.feature` files mirror). |
+| `e2e-steps-spec.md` | How the tests bind to the product (selectors, seams, probes). |
+
+Docs 2 and 4 are the same depth, different concern: product internals vs test wiring.
+
+### The hard rules (binding on every `.feature`)
+
+1. **Behaviour, not implementation.** No selectors, DOM ids, CSS classes, store/internal-API names, or
+   state-poking in `Given/When/Then`. The "how" lives only in the step layer.
+2. **Real triggers.** A behaviour is provoked by a real action, never by setting an internal flag.
+3. **No silent swallow.** Every scenario is a real, falsifiable assertion; a failure turns the group RED.
+4. **No fake green.** A case is genuinely asserted, or an explicit `@skip` with a tracked reason — never
+   a bare pass.
+5. **Self-provisioning fixtures, through the UI.** State is created by driving the real product.
+6. **Hermetic & LLM-less.** Seams make agent-driven behaviour deterministic; no API keys, no live MCP.
+7. **≤10 grouped features, one webm video each.**
+
+### Plugin-specific vs common (don't rebuild — link)
+
+The devkit owns the runner, the shared step library, and the **common lifecycle** feature+steps
+(install/uninstall/boot/probe-enable/onboarding-suppression). A plugin ships **only its own behaviour**
+features + steps, and its run *composes* devkit-common + plugin-specific via the `tests/_testkit`
+submodule. Never copy a lifecycle scenario or a common step into a plugin.
+
+### Triggering agent behaviour without an LLM (the seam — DEC-064)
+
+"The agent asks me a question" normally needs a live LLM. Instead the plugin ships a **deterministic
+seam** — a small test-only API handler that invokes the *real* code path (creating genuine state the
+user then sees), gated on for e2e only via `.devkit.yml e2e_pod_env` (e.g. `A0_<PLUGIN>_TEST_PROBE=1`).
+This extends the `dump_live` philosophy from *observing* state to *triggering* it. A real (stubbed) LLM
+turn is used only when a behaviour is genuinely un-seamable. The seam lives in the step/plugin test
+surface — never in the `.feature`.
+
+### Fork-robustness gotchas (learned from the ask-user-question pilot — DEC-065)
+
+The tests run on the **fork** image we deploy, which differs from stock A0 in ways that bit us — encode
+these so the next plugin doesn't rediscover them:
+
+- **Use a real chat context, not a synthetic one.** A client-side `newContext()` with no backing chat
+  is *deselected by the fork's chat-restore* on load → any context-scoped poll skips. Create a **real
+  persisted chat** (`callJsonApi("/chat_create", {})` — the UI's New-Chat path) and select that; the
+  restore keeps it.
+- **Hide unrelated overlays before clicking.** With no LLM configured, A0 shows a `composer-banner`
+  that overlays part of the chat UI and **intercepts clicks**. Hide it (`display:none`) before clicking
+  an underlying button. `dispatchEvent("click")` is *not* a substitute — it bypasses the overlay but
+  does **not** trigger the framework's `@click` handler; you need a real click on a clear target.
+- **Suppress onboarding.** The onboarding modal auto-opens with no LLM key — suppress it via
+  `addInitScript` (hide `[data-modal-path*=_onboarding]` + neutralize the backdrop).
+- **Never `await` `openModal`/`openPluginConfig`** inside `page.evaluate` — they return non-resolving
+  promises that hang to the test timeout. Fire-and-forget + a bounded `toBeVisible`.
+
+---
+
+## How a plugin consumes the devkit
+
+1. **Vendor the devkit** as the `tests/_testkit` submodule, pinned to the devkit's `main`.
+2. **Declare `.devkit.yml`** at the plugin root: `plugin_dir`, `display_name`, optional `build:`, and
+   `e2e_pod_env:` for any test seam vars (e.g. `A0_<PLUGIN>_TEST_PROBE: "1"`).
+3. **Add the caller workflow** `.github/workflows/plugin-e2e.yml`:
+   ```yaml
+   jobs:
+     e2e:
+       uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
+       secrets: inherit          # forwards the GHCR pull token for the private fork image
    ```
+4. **Ship the tests.** For BDD: `docs/spec/` (the 4 docs), `tests/e2e/features/*.feature`,
+   `tests/e2e/steps/*.ts` (importing the devkit base via `../../_testkit/e2e/bdd/bdd-fixtures`), and the
+   seam handler if needed. CI auto-runs `run-bdd.sh`.
 
-2. **Put it on `pythonpath`** in your `pyproject.toml`:
-   ```toml
-   [tool.pytest.ini_options]
-   pythonpath = [".", ".testkit/src"]
-   ```
+Gold-standard worked example: **[`agent-zero-plugin-ask-user-question`](https://github.com/agent-zero-plugins/agent-zero-plugin-ask-user-question)**
+(`docs/spec/` + `tests/e2e/` + `api/ask_probe.py` seam; 12 behaviour scenarios green on the fork).
 
-3. **Declare the `plugin_dir` fixture** once in `tests/conftest.py`:
-   ```python
-   from pathlib import Path
-   import pytest
+---
 
-   @pytest.fixture(scope="session")
-   def plugin_dir() -> Path:
-       return Path(__file__).resolve().parent.parent / "usr" / "plugins" / "<your_plugin>"
-   ```
+## CI: what runs, and on what image
 
-4. **Drop in a baseline test file** (5 assertions, ~1 second):
-   ```python
-   # tests/component/test_plugin_shape.py
-   from pathlib import Path
-   import pytest
+The reusable `plugin-e2e.yml` (called on every PR + `workflow_dispatch`):
 
-   from a0_plugin_testkit.assertions import (
-       assert_no_stray_extension_folders,
-       assert_no_dead_plugin_hooks,
-       assert_plugin_has_thumbnail,
-   )
-   from a0_plugin_testkit.real.validator import static_validate, assert_validator_clean
-   from a0_plugin_testkit.real.deps import audit_dependencies, assert_dependencies_declared
-   from a0_plugin_testkit.real.a0_api import audit_a0_api_usage, assert_a0_api_usage_ok
+1. mints a token + checks out the plugin and its `tests/_testkit` submodule;
+2. resolves the plugin (`.devkit.yml` → else `usr/plugins/<name>`);
+3. builds the devcontainer and packages the plugin zip;
+4. boots A0 **nested + rootless** and runs `run-bdd.sh` (or `run-lifecycle.sh`), forwarding
+   `e2e_pod_env` seam vars into the nested A0;
+5. uploads one webm per scenario as an artifact.
 
-   pytestmark = pytest.mark.component
+**Fork-first (DEC-055):** the default image is the fork we actually deploy
+(`ghcr.io/nuevanext/agent-zero:latest-nonroot`, private — `secrets: inherit` forwards the
+`GHCR_PULL_TOKEN`). We test what we ship.
 
-   def test_no_stray_folders(plugin_dir: Path) -> None:
-       assert_no_stray_extension_folders(plugin_dir)
+---
 
-   def test_no_dead_hooks(plugin_dir: Path) -> None:
-       assert_no_dead_plugin_hooks(plugin_dir)
+## Local dev loop
 
-   def test_thumbnail(plugin_dir: Path) -> None:
-       assert_plugin_has_thumbnail(plugin_dir)
+Iterate against a **disposable** A0 — the devcontainer or a host-podman A0 on a non-80 port — and
+**never the operator's live instance** (see the `no-live-a0-for-testing` skill). Drive it with local
+Playwright, screenshot/trace each step to learn the real selectors, get the groups green locally, then
+push and confirm the same green in the `plugin-e2e` gate. (The same `run-bdd.sh` config runs locally
+from the submodule's `e2e/bdd` dir with `PLUGIN_BDD_DIR` set to the plugin's `tests/e2e`.)
 
-   def test_validator(plugin_dir: Path) -> None:
-       assert_validator_clean(static_validate(plugin_dir), allow_warnings=False)
-
-   def test_deps_declared(plugin_dir: Path) -> None:
-       assert_dependencies_declared(audit_dependencies(plugin_dir))
-
-   def test_a0_api_usage_valid(plugin_dir: Path) -> None:
-       assert_a0_api_usage_ok(audit_a0_api_usage(plugin_dir))
-   ```
-
-For the full narrative — methodology, extension guidelines, hard rules,
-and the bug-story behind each assertion — read [`skill/SKILL.md`](skill/SKILL.md).
-Plugin repos typically symlink it into their `.claude/skills/`, `.github/skills/`,
-and `.antigravity/skills/` so Claude Code / Copilot / Antigravity pick it up.
-
-## A0 reachability
-
-Most assertions read from A0's source at import time. They look for A0 in:
-
-1. `$A0_ROOT` environment variable.
-2. `<repo>/.agent-zero/` submodule (the standard layout in agent-zero-operator plugin repos).
-3. Walking up from the testkit's own location.
-
-If none resolve, assertions raise with an actionable message.
-
-## Developing the testkit itself
-
-This repo includes `.agent-zero/` as a **dev-scope submodule** pinned at the
-same commit the first adopter uses, so the testkit can be self-tested in
-isolation. It does NOT affect consumers — their own `.agent-zero` takes
-precedence via the A0-reachability chain above.
-
+The static pytest layer needs no A0 boot:
 ```bash
-git clone --recurse-submodules https://github.com/agent-zero-operator/agent-zero-plugin-development-testkit
-cd agent-zero-plugin-development-testkit
+git clone --recurse-submodules <this-repo> && cd agent-zero-plugin-development-testkit
 python -m pip install -e ".[fasta2a]" pytest pytest-asyncio
-pytest                           # 9 smoke tests in <100ms
+pytest                                  # fast smoke tests
 ```
 
-To bump the pinned A0:
-
-```bash
-cd .agent-zero && git checkout <ref> && cd ..
-git add .agent-zero && git commit -m "chore: bump A0 to <ref>"
-```
+---
 
 ## Design principles
 
-- **Scrape, don't hard-code.** Every list of names (extension points, hooks, API attrs) is derived from the live A0 source the testkit is loaded against. Upgrading A0 automatically adjusts the canonical list.
-- **Never teach a fake an API the real thing doesn't have.** `FakeSettings` mirrors A0's real surface (`set_settings_delta`, not `set_setting`). A fake with a wider surface than reality masks production bugs.
-- **No PyPI.** Submodule distribution matches how the `agent-zero-operator-skills` library is distributed. Versioning is commit-pin.
-- **No heavy runtime deps.** The testkit itself is pure Python + pytest. Individual helpers (like `scripted_a2a_server`) pull in their own extras (`fasta2a`, `uvicorn`, `httpx`) only if the consumer imports them.
-- **Red-first.** Every assertion was written against a real shipped bug from the first adopter, with the pre-fix state verified by time-travelling the repo. See the skill for the methodology.
+- **Scrape, don't hard-code.** Canonical name lists (extension points, hooks, API attrs) are derived
+  from the live A0 source the devkit is loaded against — upgrading A0 adjusts them automatically.
+- **Never teach a fake an API the real thing doesn't have.** A fake wider than reality masks prod bugs.
+- **Batteries-included, linked not copied.** Common machinery lives here once; plugins reference it.
+- **No fake green.** Honesty rules forbid silent swallow and untracked skips — a green check means the
+  behaviour was actually exercised against a live instance.
+- **No PyPI.** Submodule distribution, commit-pin versioning — same model as the operator-skills library.
 
-## Extracted from
+---
 
-[`agent-zero-plugin-livekit`](https://github.com/agent-zero-operator/agent-zero-plugin-livekit) — during that plugin's bring-up, eight classes of bug surfaced (invalid extension-point name, undeclared third-party import, dead lifecycle hook, fabricated A0 API call, blank thumbnail, missing preflight, silent subprocess death, unmanaged credential defaults). Each became an assertion here.
+## Pointers
+
+- The standard: [`SPEC.md`](SPEC.md) (§5.14 + DEC-059–065 for the BDD method).
+- The method skill (for agents): `a0-plugin-e2e-bdd` in the operator-skills library.
+- Consumer onboarding: [`docs/ADOPTING.md`](docs/ADOPTING.md).
+- Upstream-vs-fork compatibility: [`docs/a0-compatibility.md`](docs/a0-compatibility.md).
 
 ## License
 
