@@ -144,6 +144,15 @@ jobs:
           sudo docker image prune -af 2>/dev/null || true
           echo "after reclaim:"; df -h / | tail -1
 
+      - name: Tier-1 BDD lint (DEC-066, hard-fail)
+        # Behaviour-first honesty/purity/traceability gates. Self-skips for non-BDD
+        # plugins (no tests/e2e/features/). Runs before the expensive build so a
+        # standard violation fails fast — this is the gate humans + agents can't lazy past.
+        env:
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+          PLUGIN_DIR: ${{ steps.resolve.outputs.plugin_dir }}
+        run: python3 "$DEVKIT_PATH/e2e/lint/bdd_lint.py" "$PLUGIN_DIR"
+
       - name: Build devkit devcontainer (rootless)
         env:
           DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
