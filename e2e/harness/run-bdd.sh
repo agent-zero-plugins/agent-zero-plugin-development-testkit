@@ -55,7 +55,9 @@ export A0_USERNAME="${A0_USERNAME:-admin}" A0_PASSWORD="${A0_PASSWORD:-admin}"
 # playwright pass, no second A0 boot.
 RP_LOG="$(mktemp)"
 ( cd "$BDD" && BDD_SKIP_INSTALL=1 npx playwright test --config=playwright.config.ts ) > "$RP_LOG" 2>&1 || true
-RP_PASSED=$(grep -oE '[0-9]+ passed' "$RP_LOG" | grep -oE '[0-9]+' | head -1); RP_PASSED=${RP_PASSED:-0}
+# NB: 0-passed is the SUCCESS case here and prints no "N passed" line, so grep
+# would exit non-zero — `|| true` keeps set -e from killing the script.
+RP_PASSED=$( { grep -oE '[0-9]+ passed' "$RP_LOG" || true; } | grep -oE '[0-9]+' | head -1 ); RP_PASSED=${RP_PASSED:-0}
 echo "[run-bdd] red-proof: $RP_PASSED scenario(s) passed with NO plugin installed (want 0)"
 if [ "$RP_PASSED" -gt 0 ]; then
   echo "::error::seam-off red-proof FAILED — $RP_PASSED behaviour scenario(s) passed with no plugin installed (fake-green). See tests/_testkit/docs/BDD-GATES.md (Gate 3)."
