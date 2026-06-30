@@ -58,7 +58,7 @@ RP_LOG="$(mktemp)"
 RP_PASSED=$(grep -oE '[0-9]+ passed' "$RP_LOG" | grep -oE '[0-9]+' | head -1); RP_PASSED=${RP_PASSED:-0}
 echo "[run-bdd] red-proof: $RP_PASSED scenario(s) passed with NO plugin installed (want 0)"
 if [ "$RP_PASSED" -gt 0 ]; then
-  echo "::error::seam-off red-proof FAILED — $RP_PASSED behaviour scenario(s) passed with no plugin installed (fake-green)"
+  echo "::error::seam-off red-proof FAILED — $RP_PASSED behaviour scenario(s) passed with no plugin installed (fake-green). See tests/_testkit/docs/BDD-GATES.md (Gate 3)."
   grep -aE '✓|passed|failed' "$RP_LOG" | tail -20
   exit 1
 fi

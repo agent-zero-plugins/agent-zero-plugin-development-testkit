@@ -114,7 +114,8 @@ if violations:
     print("\n[bdd-lint] VIOLATIONS:")
     for g, loc, msg in violations:
         print(f"  ✘ [{g}] {loc}\n      {msg}")
-    print(f"\n[bdd-lint] {len(violations)} violation(s) — see the standard (devkit SPEC §5.14, DEC-059–066).")
+    print(f"\n[bdd-lint] {len(violations)} violation(s). What each error means + how to fix it: "
+          f"tests/_testkit/docs/BDD-GATES.md (devkit SPEC §5.14, DEC-059–066).")
     sys.exit(1)
 print("[bdd-lint] ✅ all Tier-1 static gates pass.")
 sys.exit(0)
