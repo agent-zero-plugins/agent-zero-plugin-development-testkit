@@ -15,6 +15,13 @@ export const test = a0.extend<{}, { installedPlugin: void }>({
     async ({ browser }, use) => {
       const ZIP = process.env.PLUGIN_ZIP;
       const DISPLAY = process.env.PLUGIN_DISPLAY_NAME;
+      // Gate-3 seam-off red-proof (DEC-066): run the behaviour scenarios on the
+      // SAME instance with the plugin NOT installed — honest scenarios must go RED
+      // (the seam endpoint 404s). If they pass, they're fake-green.
+      if (process.env.BDD_SKIP_INSTALL === "1") {
+        await use();
+        return;
+      }
       const withPanel = async (fn: (pp: PluginsPage) => Promise<void>) => {
         const ctx = await browser.newContext({ baseURL: process.env.A0_BASE || "http://localhost:8099" });
         const page = await ctx.newPage();
