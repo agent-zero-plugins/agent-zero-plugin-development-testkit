@@ -87,6 +87,24 @@ Three checks under one gate:
 - **Opt-out:** omit both fields and the plugin publishes legacy-style (unverified). Once you add them,
   enforcement is hard.
 
+### Why the PR *merge button* isn't hard-blocked (and what we do instead)
+
+On **free private repos**, GitHub does **not** offer required status checks — via neither branch
+protection nor rulesets (both are paid: Pro/Team/Enterprise). So nothing GitHub-native can stop a red
+PR from being merged. Two layers compensate:
+
+- **Merge-guard (PR-level deterrent).** The `plugin-e2e` workflow's `merge-guard` job converts a PR to
+  **draft** when the check is red (and marks it ready when green) — a draft can't be merged via the
+  normal button. It's friction + a clear signal, **not** a lock: a maintainer can re-ready a draft, or
+  push straight to a branch with no PR. Needs `permissions: pull-requests: write` on the caller (the
+  template sets it).
+- **Verified-publish (the real block).** Shipping a plugin goes through the gate, which refuses to
+  publish unless `plugin-e2e` was green on `source_commit`. So a red plugin **can be merged but can
+  never ship**. That's the hard guarantee; the merge-guard just makes the red state obvious earlier.
+
+If you later move repos to a paid tier, add a ruleset requiring the `e2e` check and the merge button is
+hard-blocked too — the merge-guard then becomes redundant and can be dropped.
+
 ---
 
 ## Quick fix-it index

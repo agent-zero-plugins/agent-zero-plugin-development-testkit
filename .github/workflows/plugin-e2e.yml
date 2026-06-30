@@ -243,3 +243,31 @@ jobs:
           path: artifacts/
           if-no-files-found: warn
           retention-days: 30
+
+  merge-guard:
+    # Free private repos can't use required status checks (paid feature), so block
+    # the merge button the only free way: convert the PR to draft when plugin-e2e
+    # is red, mark it ready when green. A deterrent + signal — the publish gate
+    # (DEC-066 Tier-2) is the hard block on *shipping*; a maintainer can still
+    # re-ready a draft, so this is PR-level friction, not a lock.
+    needs: e2e
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Draft on red / ready on green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.e2e.result }}
+        run: |
+          if [ "$RESULT" = "success" ]; then
+            gh pr ready "$PR" --repo "$REPO" || true
+            echo "plugin-e2e green → PR #$PR marked ready."
+          else
+            gh pr ready "$PR" --repo "$REPO" --undo || true
+            gh pr comment "$PR" --repo "$REPO" --body "🚫 **Merge blocked** — \`plugin-e2e\` concluded **$RESULT**, so this PR was converted to draft. Fix the gates (see \`tests/_testkit/docs/BDD-GATES.md\`); a green run marks it ready again. The publish gate also blocks shipping until green." || true
+            echo "plugin-e2e $RESULT → PR #$PR converted to draft (merge blocked)."
+          fi
