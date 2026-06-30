@@ -15,6 +15,22 @@ verified-publish.
 
 ---
 
+## Run the gates before you commit (don't wait for CI)
+
+The Tier-1 static gates are fast and need no A0 — run them locally and CI won't surprise you:
+
+```bash
+make verify                       # the 3 static gates (feature-purity, honesty, traceability)
+python3 tests/_testkit/e2e/lint/bdd_lint.py .   # same thing, if you have no Makefile
+make install-hooks                # git pre-commit hook that runs `make verify` automatically
+make bdd-e2e                      # full local run (lint + red-proof + e2e) on a disposable A0
+```
+
+Wire it in your plugin Makefile with `DEVKIT ?= tests/_testkit` then `include $(DEVKIT)/e2e/make/bdd.mk`.
+Same gates as CI, so green locally ⇒ green in the gate.
+
+---
+
 ## Tier-1, repo level (your `plugin-e2e`)
 
 ### Gate 1 — feature-purity  `[bdd-lint]`

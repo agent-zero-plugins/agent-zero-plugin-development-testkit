@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Devkit BDD pre-commit hook (DEC-066). Install with: make install-hooks
+# Runs the Tier-1 static gates locally so a behaviour-BDD violation is caught
+# before the commit — not in CI. Fast (no A0 boot); self-skips non-BDD plugins.
+set -euo pipefail
+
+DEVKIT="${DEVKIT:-tests/_testkit}"
+LINT="$DEVKIT/e2e/lint/bdd_lint.py"
+
+[ -f "$LINT" ] || { echo "[pre-commit] $LINT not found — is the devkit submodule initialised?"; exit 0; }
+
+if ! python3 "$LINT" .; then
+  echo ""
+  echo "[pre-commit] BDD gates failed — commit blocked. Fix the above (see $DEVKIT/docs/BDD-GATES.md),"
+  echo "             or bypass once with: git commit --no-verify"
+  exit 1
+fi
