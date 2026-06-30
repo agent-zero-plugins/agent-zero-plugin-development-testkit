@@ -47,8 +47,25 @@ export BDD_FEATURES_ROOT="$WORK"
 export A0_BASE="$A0_BASE_URL"
 export A0_USERNAME="${A0_USERNAME:-admin}" A0_PASSWORD="${A0_PASSWORD:-admin}"
 
+( cd "$BDD" && npx bddgen )
+
+# Gate-3 seam-off red-proof (DEC-066): on the SAME instance, BEFORE installing the
+# plugin, the behaviour scenarios must NOT pass — the seam endpoint 404s without the
+# plugin, so honest scenarios go RED. Any pass here is fake-green. Cheap: one extra
+# playwright pass, no second A0 boot.
+RP_LOG="$(mktemp)"
+( cd "$BDD" && BDD_SKIP_INSTALL=1 npx playwright test --config=playwright.config.ts ) > "$RP_LOG" 2>&1 || true
+RP_PASSED=$(grep -oE '[0-9]+ passed' "$RP_LOG" | grep -oE '[0-9]+' | head -1); RP_PASSED=${RP_PASSED:-0}
+echo "[run-bdd] red-proof: $RP_PASSED scenario(s) passed with NO plugin installed (want 0)"
+if [ "$RP_PASSED" -gt 0 ]; then
+  echo "::error::seam-off red-proof FAILED — $RP_PASSED behaviour scenario(s) passed with no plugin installed (fake-green)"
+  grep -aE '✓|passed|failed' "$RP_LOG" | tail -20
+  exit 1
+fi
+echo "[run-bdd] red-proof OK — nothing passes without the plugin; the suite is real."
+
 PW_RC=0
-( cd "$BDD" && npx bddgen && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
+( cd "$BDD" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
 
 # One webm per scenario → artifacts (named by the test-results subdir = scenario).
 if [ -n "${ARTIFACT_DIR:-}" ]; then
