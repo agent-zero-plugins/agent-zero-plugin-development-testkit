@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 15 — **enforcement gates** (DEC-066: two-tier machine-checked — Tier-1 lint + seam-off red-proof, Tier-2 verified-publish, merge-guard for free private repos; docs/BDD-GATES.md); iteration 14 — **Cycle 3 PILOT MERGED + PROVEN**: DEC-065 BDD CI harness (`run-bdd.sh` + `plugin-e2e.yml` auto-branch + devcontainer `playwright-bdd`) + fork-robustness rules (real `chat_create` context, overlay-hide-then-real-click); ask-user-question 12/12 BDD scenarios green on the fork in the `plugin-e2e` gate, merged to main; iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -1007,6 +1007,39 @@ are triggered by a **deterministic seam** that invokes the real handler without 
 `dump_live` philosophy (DEC-057) from *observation* to *triggering*. The seam is enabled for e2e only
 (`.devkit.yml e2e_pod_env`); a real LLM turn (deterministic stub) is used only when a behaviour is
 genuinely un-seamable. Keeps behaviour-true scenarios hermetic.
+
+**DEC-065 — BDD CI execution harness + fork-robustness (proven by the ask-user-question pilot).**
+*Augments DEC-063.* The batteries-included BDD layer is executed in CI by `e2e/harness/run-bdd.sh`
+(boots A0 via `a0-up`, copies the plugin tree to a writable workspace, symlinks the devcontainer's
+global `node_modules`, runs `bddgen` + `playwright test` from the **submodule's** `e2e/bdd` config with
+`PLUGIN_BDD_DIR` → the plugin's `tests/e2e`, collects one webm per scenario). The reusable
+`plugin-e2e.yml` **auto-branches**: it runs `run-bdd.sh` when the plugin ships `tests/e2e/features/`,
+else the classic `run-lifecycle.sh` (backward-compatible for un-migrated plugins). The devcontainer
+installs `playwright-bdd`. **Operational fork-robustness requirements the steps MUST observe** (the
+fork image diverges from stock): (a) provision a **real persisted chat context** (`chat_create`), never
+a synthetic `newContext()` — the fork's chat-restore deselects the latter, starving context-scoped
+polls; (b) **hide unrelated overlays** (e.g. the no-LLM `composer-banner`) before clicking an
+underlying control — and use a **real click on a clear target**, since a dispatched event bypasses the
+overlay but does not trigger the framework handler. Verified: ask-user-question 12/12 BDD scenarios
+green on the fork image in the `plugin-e2e` gate (+ 2 tracked `@skip` for tool-only behaviours).
+
+**DEC-066 — Two-tier machine-checked enforcement of the BDD standard.** The standard (DEC-059–065) was
+advisory; make it enforced, because humans and AI agents both cut corners. **Tier-1 (repo, hard-fail in
+`plugin-e2e`, where the test files live):** a linter (`e2e/lint/bdd_lint.py`) runs three static gates —
+**feature-purity** (no selectors/DOM-ids/store-names/internal-API in `Given/When/Then`), **honesty**
+(every `@skip` has a tracked reason; no swallowed `catch`/`.catch`; the four `docs/spec` docs exist), and
+**traceability** (every `BEH-n` in `behaviour-spec.md` is covered in `e2e.feature.md` or tracked-skipped);
+plus the **seam-off red-proof** in `run-bdd.sh` — run the suite once with the plugin NOT installed and
+assert **0** pass (any pass plugin-less is fake-green). Self-skips non-BDD plugins. **Tier-2 (gate,
+`agent-zero-vendor-plugins` publish):** **verified-publish** — optional `meta.yaml` `source_repo` +
+`source_commit`; when present, publish hard-fails unless the `plugin-e2e` check was green on that commit
+(the gate holds only zips, so it asks GitHub "was the upstream check green?"). **Private-repo merge:**
+free private repos cannot use required status checks (paid), so a `merge-guard` job converts a red PR to
+draft (deterrent, not a lock); the verified-publish gate is the hard block on *shipping* (a red plugin can
+be merged but never ships). Known gap: zip↔`source_commit` trust (future content-hash). **Adoption is
+per-repo on devkit-submodule bump** — hard the instant a repo is on the new devkit, no fleet breakage.
+Reference + every error→fix: `docs/BDD-GATES.md`. Threat model = laziness, human and AI alike. Verified:
+ask-user-question lint + red-proof (`0 passed`) + e2e 12/12 green on the fork.
 
 ---
 
