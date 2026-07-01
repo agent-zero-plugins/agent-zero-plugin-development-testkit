@@ -30,23 +30,42 @@ PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
 # Riding along here means the standard one-line include gives them for free.
 -include $(DEVKIT_DIR)/e2e/make/bdd.mk
 
-.PHONY: build package up down e2e conformance link-workflows link-gemini link-devkit help-devkit
+.PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-devkit help-devkit
+
+# Which devkit ref to bump to. Empty (default) = the latest release tag (vetted);
+# override for a specific release or bleeding edge:  make update-devkit DEVKIT_REF=v1.2.0
+#                                                     make update-devkit DEVKIT_REF=main
+DEVKIT_REF ?=
+
+update-devkit: ## bump the vendored devkit to the latest release tag (or DEVKIT_REF) + re-copy assets
+	@git -C $(DEVKIT_DIR) fetch -q --tags --force origin
+	@ref="$(DEVKIT_REF)"; \
+	 [ -n "$$ref" ] || ref=$$(git -C $(DEVKIT_DIR) tag -l 'v*' --sort=-v:refname | head -1); \
+	 [ -n "$$ref" ] || { echo "[devkit] no release tags yet — falling back to main"; ref=main; git -C $(DEVKIT_DIR) fetch -q origin main; }; \
+	 git -C $(DEVKIT_DIR) checkout -q --detach "$$ref" 2>/dev/null || git -C $(DEVKIT_DIR) checkout -q --detach FETCH_HEAD; \
+	 git add $(DEVKIT_DIR); \
+	 $(MAKE) --no-print-directory link-devkit; \
+	 echo "[devkit] bumped $(DEVKIT_DIR) → $$ref ($$(git -C $(DEVKIT_DIR) rev-parse --short HEAD)) + re-linked root assets."; \
+	 echo "[devkit] review, then commit: git commit -m 'chore: bump devkit to '$$ref"
 
 link-devkit: link-workflows link-gemini ## copy ALL root-level devkit assets into this repo (DEC-044/066)
 	@echo "[devkit] linked workflows + .gemini — commit them once (nightly sync only bumps the submodule pin)."
 
 link-workflows: ## copy the devkit-sync + plugin-e2e caller workflows into .github/workflows/ (DEC-044)
-	@mkdir -p .github/workflows
-	@cp $(DEVKIT_DIR)/templates/devkit-sync.caller.yml .github/workflows/devkit-sync.yml
-	@cp $(DEVKIT_DIR)/templates/plugin-e2e.caller.yml .github/workflows/plugin-e2e.yml
-	@echo "[wf] linked devkit-sync.yml + plugin-e2e.yml → .github/workflows/"
-	@echo "[wf] (GITHUB_TOKEN can't push workflow files in nightly sync — commit these once.)"
+	@if [ -d $(DEVKIT_DIR)/templates ]; then \
+	  mkdir -p .github/workflows; \
+	  cp $(DEVKIT_DIR)/templates/devkit-sync.caller.yml .github/workflows/devkit-sync.yml; \
+	  cp $(DEVKIT_DIR)/templates/plugin-e2e.caller.yml .github/workflows/plugin-e2e.yml; \
+	  echo "[wf] linked devkit-sync.yml + plugin-e2e.yml → .github/workflows/ (commit once)"; \
+	else echo "[wf] no templates/ in the devkit ref — skipping"; fi
 
 link-gemini: ## copy the .gemini AI-reviewer styleguide into this repo (DEC-066)
-	@mkdir -p .gemini
-	@cp $(DEVKIT_DIR)/.gemini/config.yaml .gemini/config.yaml
-	@cp $(DEVKIT_DIR)/.gemini/styleguide.md .gemini/styleguide.md
-	@echo "[gemini] linked .gemini/{config.yaml,styleguide.md} — commit once; Gemini Code Assist enforces the gates in review."
+	@if [ -d $(DEVKIT_DIR)/.gemini ]; then \
+	  mkdir -p .gemini; \
+	  cp $(DEVKIT_DIR)/.gemini/config.yaml .gemini/config.yaml; \
+	  cp $(DEVKIT_DIR)/.gemini/styleguide.md .gemini/styleguide.md; \
+	  echo "[gemini] linked .gemini/{config.yaml,styleguide.md} (commit once; Gemini Code Assist enforces the gates)"; \
+	else echo "[gemini] no .gemini in the devkit ref — skipping"; fi
 
 build: ## assemble the plugin dir (no-op for source-only plugins)
 	@echo "build: nothing to assemble for '$(PLUGIN_NAME)'"

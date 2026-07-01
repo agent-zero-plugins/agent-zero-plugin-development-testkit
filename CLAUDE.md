@@ -61,6 +61,21 @@ submodule bump + `make link-devkit`** — hard the instant a repo is on the new 
 
 ---
 
+## Versioning & releases (DEC-067)
+
+The devkit ships **SemVer release tags** (`vMAJOR.MINOR.PATCH`), starting at **v1.0.0**. Consumers track
+the **latest tag**, not `main`: `devkit-sync` bumps the pin to the newest tag nightly, and
+`make update-devkit` defaults to it (override `DEVKIT_REF=vX.Y.Z` or `main`). `main` is the integration
+branch; releases are cut from it.
+
+- **MAJOR** — could fail a previously-green consumer: the frozen Make targets (Appendix E.1), reusable
+  workflow inputs/behaviour, the `Makefile.devkit`/`.devkit.yml` interface, or a gate tightening.
+- **MINOR** — backward-compatible new targets/checks/assets. **PATCH** — non-contract fixes.
+- **Cutting a release:** update `CHANGELOG.md`, merge to `main`, then `git tag vX.Y.Z <commit>` + push +
+  a GitHub release. History + the exact policy live in [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
 ## Working *on* the devkit itself
 
 - **Author decisions in the SPEC.** Non-trivial changes get a numbered `DEC-NNN` + `REQ` in `SPEC.md`
