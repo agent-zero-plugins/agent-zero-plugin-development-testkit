@@ -23,11 +23,12 @@ The Tier-1 static gates are fast and need no A0 — run them locally and CI won'
 make verify                       # the 3 static gates (feature-purity, honesty, traceability)
 python3 tests/_testkit/e2e/lint/bdd_lint.py .   # same thing, if you have no Makefile
 make install-hooks                # git pre-commit hook that runs `make verify` automatically
-make bdd-e2e                      # full local run (lint + red-proof + e2e) on a disposable A0
+make e2e                          # full run (auto-selects run-bdd: lint + red-proof + e2e) on a nested A0
 ```
 
-Wire it in your plugin Makefile with `DEVKIT ?= tests/_testkit` then `include $(DEVKIT)/e2e/make/bdd.mk`.
-Same gates as CI, so green locally ⇒ green in the gate.
+These come **for free** with the standard fragment — a plugin Makefile that has
+`-include tests/_testkit/e2e/Makefile.devkit` already provides `verify` / `install-hooks` / `e2e` (the
+fragment `-include`s the BDD targets). Same gates as CI, so green locally ⇒ green in the gate.
 
 ---
 
