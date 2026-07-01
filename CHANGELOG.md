@@ -10,13 +10,19 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v1.1.1 — 2026-07-01
+
+- **Dropped the misleading `sync-skills` make target.** It only searched one source repo, but the
+  plugin-facing skills are split across `agent-zero-operator-skills` and `agent-zero-plugins-skills` (plus
+  one vendored), so it would silently miss most of them. Refreshing `skills/` before a release is a manual
+  copy from each skill's canonical repo (documented in `CLAUDE.md`).
+
 ## v1.1.0 — 2026-07-01
 
 - **Devkit ships the plugin-facing skills** (DEC-068). `make link-skills` (folded into `link-devkit`,
   run by `init.sh`) symlinks the devkit's `skills/` into a plugin's `.claude/skills/` — so a developer or
   agent in a bare plugin clone gets the runbook skills (`a0-plugin-e2e-bdd`, `a0-plugin-architecture`, …),
-  not just the machinery. Symlinks auto-refresh on a devkit bump. Added `a0-plugin-e2e-bdd` to the set;
-  `make sync-skills SKILLS_SRC=…` refreshes the snapshot from the canonical skill repos before a release.
+  not just the machinery. Symlinks auto-refresh on a devkit bump. Added `a0-plugin-e2e-bdd` to the set.
 
 ## v1.0.0 — 2026-07-01
 
