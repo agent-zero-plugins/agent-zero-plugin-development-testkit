@@ -24,20 +24,17 @@ The devkit distributes in **two channels**, and both matter:
 # 1. Vendor the devkit as a submodule (it IS the content; no PyPI/registry).
 git submodule add https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit tests/_testkit
 
-# 2. Create the root Makefile: set two vars, then include the shipped fragment.
-cat > Makefile <<'MK'
-PLUGIN_DIR          := usr/plugins/my_plugin      # dir with plugin.yaml (or "." for root-layout)
-PLUGIN_DISPLAY_NAME := My Plugin                  # title on the plugin card
--include tests/_testkit/e2e/Makefile.devkit
-MK
+# 2. One-shot adopt: writes the root Makefile + .devkit.yml (inferred from plugin.yaml),
+#    copies the root-level assets (caller workflows + .gemini), installs the pre-commit hook.
+bash tests/_testkit/init.sh
 
-# 3. Copy the root-level assets (caller workflows + .gemini) into place, then commit them.
-make link-devkit
-git add .gitmodules tests/_testkit Makefile .github/workflows .gemini && git commit -m "chore: adopt plugin devkit"
+# 3. Review + commit.
+git add .gitmodules tests/_testkit Makefile .devkit.yml .github/workflows .gemini && git commit -m "chore: adopt plugin devkit"
 ```
 
-That single `-include` gives the frozen target set **plus** the BDD verification targets (the fragment
-`-include`s `e2e/make/bdd.mk`):
+`init.sh` is idempotent — re-run it after a devkit bump to re-copy the root assets. It writes a root
+Makefile whose single `-include` gives the frozen target set **plus** the BDD verification targets (the
+fragment `-include`s `e2e/make/bdd.mk`):
 
 | Target | What it does |
 |---|---|

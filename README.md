@@ -135,19 +135,18 @@ these so the next plugin doesn't rediscover them:
 
 ## How a plugin consumes the devkit
 
-1. **Vendor the devkit** as the `tests/_testkit` submodule, pinned to the devkit's `main`.
-2. **Declare `.devkit.yml`** at the plugin root: `plugin_dir`, `display_name`, optional `build:`, and
-   `e2e_pod_env:` for any test seam vars (e.g. `A0_<PLUGIN>_TEST_PROBE: "1"`).
-3. **Add the caller workflow** `.github/workflows/plugin-e2e.yml`:
-   ```yaml
-   jobs:
-     e2e:
-       uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
-       secrets: inherit          # forwards the GHCR pull token for the private fork image
-   ```
-4. **Ship the tests.** For BDD: `docs/spec/` (the 4 docs), `tests/e2e/features/*.feature`,
-   `tests/e2e/steps/*.ts` (importing the devkit base via `../../_testkit/e2e/bdd/bdd-fixtures`), and the
-   seam handler if needed. CI auto-runs `run-bdd.sh`.
+Two commands (details + agent guidance in [`CLAUDE.md`](CLAUDE.md)):
+
+```bash
+git submodule add https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit tests/_testkit
+bash tests/_testkit/init.sh   # writes the root Makefile + .devkit.yml, copies workflows + .gemini, installs the hook
+```
+
+`init.sh` infers `plugin_dir`/`display_name` from your `plugin.yaml`, is idempotent (re-run after a devkit
+bump), and leaves you with `make verify` / `make e2e` and the caller workflows in place. Then **ship the
+tests** — for BDD: `docs/spec/` (the 4 docs), `tests/e2e/features/*.feature`, `tests/e2e/steps/*.ts`
+(importing the devkit base via `../../_testkit/e2e/bdd/bdd-fixtures`), and the seam handler if needed;
+CI auto-runs `run-bdd.sh`.
 
 Gold-standard worked example: **[`agent-zero-plugin-ask-user-question`](https://github.com/agent-zero-plugins/agent-zero-plugin-ask-user-question)**
 (`docs/spec/` + `tests/e2e/` + `api/ask_probe.py` seam; 12 behaviour scenarios green on the fork).
