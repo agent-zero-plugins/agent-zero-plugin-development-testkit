@@ -58,7 +58,7 @@ make install-hooks
 cat <<DONE
 
 ✅ devkit adopted. Review, then commit:
-   git add .gitmodules $DEVKIT Makefile .devkit.yml .github/workflows .gemini
+   git add .gitmodules $DEVKIT Makefile .devkit.yml .github/workflows .gemini .claude/skills
    git commit -m "chore: adopt plugin devkit"
 
 Next:  make verify     # Tier-1 gates locally (fast, no A0)
