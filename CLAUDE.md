@@ -55,10 +55,13 @@ fragment `-include`s `e2e/make/bdd.mk`):
   workflow files). When a caller workflow or `.gemini` styleguide changes upstream, re-run
   `make link-devkit` and commit. **Skills are the exception** — they're *symlinks* into the submodule, so
   they refresh automatically when the pin bumps; no re-link needed.
-- **Skills provenance (avoid drift):** `skills/` in the devkit is a *distribution snapshot* of the
-  plugin-facing skills whose **canonical homes are the skill repos** (`agent-zero-operator-skills`, etc.).
-  A maintainer refreshes it before cutting a release: `make sync-skills SKILLS_SRC=/path/to/agent-zero-operator-skills`.
-  Skills with no operator-skills source are devkit-owned and left as-is.
+- **Skills provenance (avoid drift):** `skills/` in the devkit is a *distribution snapshot* — the
+  **canonical homes are split across skill repos**: `a0-plugin-e2e-bdd` → `agent-zero-operator-skills`;
+  `a0-plugin-architecture` / `a0-bootstrap-plugin` / `author-plugin-from-template` /
+  `plugin-manifest-contract` / `rotate-plugin-credentials` / `troubleshoot-plugin-deployment` →
+  `agent-zero-plugins-skills`; `a0-plugin-testkit` is vendored. A maintainer **manually copies** the
+  changed skill(s) from the right repo into `skills/` before cutting a release (no automated sync target —
+  the sources are split, so a one-source helper would be misleading).
 
 ### The four enforcement layers a consumer gets (fastest-first)
 

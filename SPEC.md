@@ -1058,10 +1058,11 @@ into every plugin (the `tests/_testkit` submodule), but the *skills that documen
 a developer/agent in a bare plugin clone didn't get them. Fix: the devkit ships a curated **`skills/`**
 set, and `make link-skills` (folded into `link-devkit`, run by `init.sh`) **symlinks** them into the
 plugin's `.claude/skills/`. Symlinks (not copies) so they auto-refresh when the devkit pin bumps.
-**Provenance / anti-drift:** `skills/` is a *distribution snapshot*; the canonical homes are the skill
-repos (`agent-zero-operator-skills`, …). A maintainer refreshes it before a release via
-`make sync-skills SKILLS_SRC=<operator-skills-checkout>`; devkit-owned skills (no operator-skills source)
-are left as-is. Shipped in devkit **v1.1.0**.
+**Provenance / anti-drift:** `skills/` is a *distribution snapshot*; the canonical homes are split across
+skill repos (`a0-plugin-e2e-bdd` → `agent-zero-operator-skills`; most others → `agent-zero-plugins-skills`;
+`a0-plugin-testkit` vendored). A maintainer **manually copies** the changed skill from the right repo into
+`skills/` before a release (no automated sync target — the split sources would make a one-source helper
+misleading). Shipped in devkit **v1.1.0**; the misleading `sync-skills` target was dropped in **v1.1.1**.
 
 ---
 

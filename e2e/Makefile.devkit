@@ -30,7 +30,7 @@ PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
 # Riding along here means the standard one-line include gives them for free.
 -include $(DEVKIT_DIR)/e2e/make/bdd.mk
 
-.PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-skills link-devkit sync-skills help-devkit
+.PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-skills link-devkit help-devkit
 
 # Which devkit ref to bump to. Empty (default) = the latest release tag (vetted);
 # override for a specific release or bleeding edge:  make update-devkit DEVKIT_REF=v1.2.0
@@ -58,14 +58,6 @@ link-skills: ## symlink the devkit's plugin-facing skills into .claude/skills/ (
 	    ln -sfn "../../$(DEVKIT_DIR)/skills/$$n" ".claude/skills/$$n"; done; \
 	  echo "[skills] symlinked $(DEVKIT_DIR)/skills/* → .claude/skills/ (Claude Code / Copilot / Antigravity)"; \
 	else echo "[skills] no skills/ in the devkit ref — skipping"; fi
-
-sync-skills: ## (maintainer, in the DEVKIT repo) refresh skills/ from an operator-skills checkout: make sync-skills SKILLS_SRC=/path/to/agent-zero-operator-skills
-	@[ -n "$(SKILLS_SRC)" ] || { echo "set SKILLS_SRC=/path/to/agent-zero-operator-skills"; exit 1; }
-	@for d in skills/*/; do n=$$(basename "$$d"); \
-	  src=$$(find "$(SKILLS_SRC)/shared-assets/skills" -type d -name "$$n" 2>/dev/null | head -1); \
-	  if [ -n "$$src" ]; then rm -rf "$$d"; cp -r "$$src" "skills/$$n"; echo "  refreshed skills/$$n"; \
-	  else echo "  skills/$$n — not in operator-skills (devkit-owned; left as-is)"; fi; done
-	@echo "[skills] refreshed from $(SKILLS_SRC) — review + commit before cutting a release."
 
 link-workflows: ## copy the devkit-sync + plugin-e2e caller workflows into .github/workflows/ (DEC-044)
 	@if [ -d $(DEVKIT_DIR)/templates ]; then \
