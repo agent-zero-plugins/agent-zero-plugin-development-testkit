@@ -26,7 +26,14 @@ PLUGIN_ZIP   ?= $(DIST_DIR)/$(PLUGIN_NAME).zip
 PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
   --sysctl net.ipv4.ip_unprivileged_port_start=0
 
-.PHONY: build package up down e2e conformance link-workflows help-devkit
+# BDD verification targets (make verify / bdd-lint / install-hooks) — DEC-066.
+# Riding along here means the standard one-line include gives them for free.
+-include $(DEVKIT_DIR)/e2e/make/bdd.mk
+
+.PHONY: build package up down e2e conformance link-workflows link-gemini link-devkit help-devkit
+
+link-devkit: link-workflows link-gemini ## copy ALL root-level devkit assets into this repo (DEC-044/066)
+	@echo "[devkit] linked workflows + .gemini — commit them once (nightly sync only bumps the submodule pin)."
 
 link-workflows: ## copy the devkit-sync + plugin-e2e caller workflows into .github/workflows/ (DEC-044)
 	@mkdir -p .github/workflows
@@ -34,6 +41,12 @@ link-workflows: ## copy the devkit-sync + plugin-e2e caller workflows into .gith
 	@cp $(DEVKIT_DIR)/templates/plugin-e2e.caller.yml .github/workflows/plugin-e2e.yml
 	@echo "[wf] linked devkit-sync.yml + plugin-e2e.yml → .github/workflows/"
 	@echo "[wf] (GITHUB_TOKEN can't push workflow files in nightly sync — commit these once.)"
+
+link-gemini: ## copy the .gemini AI-reviewer styleguide into this repo (DEC-066)
+	@mkdir -p .gemini
+	@cp $(DEVKIT_DIR)/.gemini/config.yaml .gemini/config.yaml
+	@cp $(DEVKIT_DIR)/.gemini/styleguide.md .gemini/styleguide.md
+	@echo "[gemini] linked .gemini/{config.yaml,styleguide.md} — commit once; Gemini Code Assist enforces the gates in review."
 
 build: ## assemble the plugin dir (no-op for source-only plugins)
 	@echo "build: nothing to assemble for '$(PLUGIN_NAME)'"
@@ -44,7 +57,16 @@ package: ## produce the versioned plugin zip from $(PLUGIN_DIR)
 	cd $(PLUGIN_DIR) && zip -qr $(abspath $(PLUGIN_ZIP)) . -x '*.DS_Store' 'tests/*' '.github/*' '*/node_modules/*'
 	@echo "packaged → $(PLUGIN_ZIP)"
 
-e2e: package ## full lifecycle (install → verify-installed → uninstall → verify-uninstalled) in the devcontainer
+e2e: package ## behaviour BDD if tests/e2e/features/ exists, else classic lifecycle — in the devcontainer
+	@harness=run-lifecycle.sh; \
+	ls $(PLUGIN_DIR)/tests/e2e/features/*.feature >/dev/null 2>&1 && harness=run-bdd.sh; \
+	pod_env=$$(awk '\
+	  /^e2e_pod_env:[[:space:]]*$$/ {inblk=1; next} \
+	  inblk && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:/ { l=$$0; sub(/^[[:space:]]+/,"",l); \
+	    k=l; sub(/:.*/,"",k); v=l; sub(/^[^:]*:[[:space:]]*/,"",v); gsub(/^["'\'']|["'\'']$$/,"",v); \
+	    printf "%s=%s ", k, v; next } \
+	  inblk && /^[^[:space:]]/ {inblk=0}' .devkit.yml 2>/dev/null); \
+	echo "[e2e] harness=$$harness  pod_env=[$$pod_env]"; \
 	podman run $(PODMAN_E2E_FLAGS) \
 	  -v $(CURDIR):/workspace:ro \
 	  -v $(abspath $(PLUGIN_ZIP)):/tmp/plugin.zip:ro \
@@ -53,7 +75,10 @@ e2e: package ## full lifecycle (install → verify-installed → uninstall → v
 	  -e PLUGIN_DISPLAY_NAME="$(PLUGIN_DISPLAY_NAME)" \
 	  -e PLUGIN_NAME=$(PLUGIN_NAME) \
 	  -e HOOK_DIR=/workspace/tests/e2e/hooks \
-	  $(DEVKIT_IMAGE) -lc 'bash /workspace/$(DEVKIT_DIR)/e2e/harness/run-lifecycle.sh'
+	  -e WORKSPACE=/workspace \
+	  -e DEVKIT_PATH=$(DEVKIT_DIR) \
+	  -e A0_POD_ENV="$$pod_env" \
+	  $(DEVKIT_IMAGE) -lc "bash /workspace/$(DEVKIT_DIR)/e2e/harness/$$harness"
 
 up: ## boot A0 nested for manual/agent exploration (inside the devcontainer)
 	podman run $(PODMAN_E2E_FLAGS) -it \

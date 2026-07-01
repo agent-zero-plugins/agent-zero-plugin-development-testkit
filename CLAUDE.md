@@ -1,0 +1,76 @@
+# CLAUDE.md — agent-zero-plugin-development-testkit
+
+Guidance for Claude Code (and any agent) working in or with this devkit. The devkit is the **single
+source of truth** for how Agent Zero plugins are built, tested, documented, and shipped. The canonical
+design is [`SPEC.md`](SPEC.md); the readable map is [`README.md`](README.md); the enforcement gates and
+their fixes are in [`docs/BDD-GATES.md`](docs/BDD-GATES.md).
+
+---
+
+## Distribution — how a repo imports the devkit *with all its assets*
+
+The devkit distributes in **two channels**, and both matter:
+
+1. **The submodule = referenced-in-place content** (auto-freshened). Everything under `tests/_testkit/…`
+   is used *where it sits*: the e2e harness, the `bdd_lint.py`, the playwright-bdd layer, the Makefile
+   fragment, the `.gemini` source, the pytest library.
+2. **Root-level assets = copied once** (GitHub Actions, Gemini, and `make` only read these from the repo
+   root, never from a submodule): the caller workflows in `.github/workflows/`, `.gemini/`, and the root
+   `Makefile`. These are copied by `make link-devkit` and committed.
+
+### New repo — the full import (gets everything, including the Makefiles)
+
+```bash
+# 1. Vendor the devkit as a submodule (it IS the content; no PyPI/registry).
+git submodule add https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit tests/_testkit
+
+# 2. One-shot adopt: writes the root Makefile + .devkit.yml (inferred from plugin.yaml),
+#    copies the root-level assets (caller workflows + .gemini), installs the pre-commit hook.
+bash tests/_testkit/init.sh
+
+# 3. Review + commit.
+git add .gitmodules tests/_testkit Makefile .devkit.yml .github/workflows .gemini && git commit -m "chore: adopt plugin devkit"
+```
+
+`init.sh` is idempotent — re-run it after a devkit bump to re-copy the root assets. It writes a root
+Makefile whose single `-include` gives the frozen target set **plus** the BDD verification targets (the
+fragment `-include`s `e2e/make/bdd.mk`):
+
+| Target | What it does |
+|---|---|
+| `make verify` | Tier-1 static gates (feature-purity · honesty · traceability) — **fast, no A0; run before every commit** |
+| `make install-hooks` | install a git pre-commit hook that runs `make verify` |
+| `make e2e` | full behaviour suite in the devcontainer — **auto-selects `run-bdd` if `tests/e2e/features/` exists**, else the classic lifecycle; forwards `.devkit.yml e2e_pod_env` seam vars |
+| `make package` / `build` / `up` / `conformance` | package the zip / assemble / boot A0 to explore / assert the frozen targets exist |
+| `make link-devkit` (`link-workflows` + `link-gemini`) | copy the root-level assets |
+
+### Keeping it fresh
+
+- The **`devkit-sync`** workflow bumps the `tests/_testkit` submodule pin to the latest devkit `main`
+  nightly. Because the submodule *is* the content, the harness / lint / BDD layer / Makefile fragment /
+  `.gemini` source all update automatically on the bump.
+- **Root-copied files do NOT auto-update** (nightly sync only moves the pin; `GITHUB_TOKEN` can't push
+  workflow files). When a caller workflow or `.gemini` styleguide changes upstream, re-run
+  `make link-devkit` and commit.
+
+### The four enforcement layers a consumer gets (fastest-first)
+
+`make verify` / pre-commit hook → `.gemini` AI review → CI (`plugin-e2e`: lint + seam-off red-proof +
+e2e, hard-fail) → publish gate (verified-publish blocks shipping). Adoption is **per-repo on the
+submodule bump + `make link-devkit`** — hard the instant a repo is on the new devkit, no fleet breakage.
+
+---
+
+## Working *on* the devkit itself
+
+- **Author decisions in the SPEC.** Non-trivial changes get a numbered `DEC-NNN` + `REQ` in `SPEC.md`
+  (method: the `spec-driven-development` skill). Don't leave a decision only in code or a commit message.
+- **Gates change ⇒ update all three faces:** the enforcer (`e2e/lint/bdd_lint.py`, `e2e/harness/`), the
+  reference (`docs/BDD-GATES.md`), and the review styleguide (`.gemini/styleguide.md`) — keep them in sync.
+- **Makefile fragments:** the frozen targets live in `e2e/Makefile.devkit`; BDD targets in
+  `e2e/make/bdd.mk` (included by the fragment). No inline comments on `VAR ?=` lines (Make folds trailing
+  spaces into the value).
+- **The reusable workflows** (`.github/workflows/plugin-e2e.yml`, `devkit-sync.yml`) are consumed
+  `@main` by every plugin — treat them as a public contract; keep changes backward-compatible.
+- **Never test against the operator's live A0** — boot a disposable instance (see `no-live-a0-for-testing`).
+- Method/runbook for authoring a plugin's BDD e2e: the `a0-plugin-e2e-bdd` skill.
