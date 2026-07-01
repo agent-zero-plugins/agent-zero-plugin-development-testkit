@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 16 — **versioning** (DEC-067: SemVer release tags; consumers track the latest tag; first release **v1.0.0**; CHANGELOG.md); iteration 15 — **enforcement gates** (DEC-066: two-tier machine-checked — Tier-1 lint + seam-off red-proof, Tier-2 verified-publish, merge-guard for free private repos; docs/BDD-GATES.md); iteration 14 — **Cycle 3 PILOT MERGED + PROVEN**: DEC-065 BDD CI harness (`run-bdd.sh` + `plugin-e2e.yml` auto-branch + devcontainer `playwright-bdd`) + fork-robustness rules (real `chat_create` context, overlay-hide-then-real-click); ask-user-question 12/12 BDD scenarios green on the fork in the `plugin-e2e` gate, merged to main; iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 17 — **skills distribution** (DEC-068: the devkit ships the plugin-facing skills, symlinked into .claude/skills/ via link-skills; v1.1.0); iteration 16 — **versioning** (DEC-067: SemVer release tags; consumers track the latest tag; first release **v1.0.0**; CHANGELOG.md); iteration 15 — **enforcement gates** (DEC-066: two-tier machine-checked — Tier-1 lint + seam-off red-proof, Tier-2 verified-publish, merge-guard for free private repos; docs/BDD-GATES.md); iteration 14 — **Cycle 3 PILOT MERGED + PROVEN**: DEC-065 BDD CI harness (`run-bdd.sh` + `plugin-e2e.yml` auto-branch + devcontainer `playwright-bdd`) + fork-robustness rules (real `chat_create` context, overlay-hide-then-real-click); ask-user-question 12/12 BDD scenarios green on the fork in the `plugin-e2e` gate, merged to main; iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -1051,6 +1051,17 @@ backward-compatible new targets/checks/assets; **PATCH** = non-contract fixes. *
 `devkit-sync` workflow bumps a consumer's `tests/_testkit` pin to the **latest release tag** (not `main`),
 and `make update-devkit` defaults to the latest tag (override `DEVKIT_REF=vX.Y.Z`/`main`). `main` stays the
 integration branch; releases are cut from it. History + policy live in `CHANGELOG.md`.
+
+**DEC-068 — The devkit distributes the plugin-facing skills.** Problem: the devkit machinery is vendored
+into every plugin (the `tests/_testkit` submodule), but the *skills that document how to use it*
+(`a0-plugin-e2e-bdd`, `a0-plugin-architecture`, …) were only available via the operator's global install —
+a developer/agent in a bare plugin clone didn't get them. Fix: the devkit ships a curated **`skills/`**
+set, and `make link-skills` (folded into `link-devkit`, run by `init.sh`) **symlinks** them into the
+plugin's `.claude/skills/`. Symlinks (not copies) so they auto-refresh when the devkit pin bumps.
+**Provenance / anti-drift:** `skills/` is a *distribution snapshot*; the canonical homes are the skill
+repos (`agent-zero-operator-skills`, …). A maintainer refreshes it before a release via
+`make sync-skills SKILLS_SRC=<operator-skills-checkout>`; devkit-owned skills (no operator-skills source)
+are left as-is. Shipped in devkit **v1.1.0**.
 
 ---
 

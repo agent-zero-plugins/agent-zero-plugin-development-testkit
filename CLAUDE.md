@@ -14,9 +14,11 @@ The devkit distributes in **two channels**, and both matter:
 1. **The submodule = referenced-in-place content** (auto-freshened). Everything under `tests/_testkit/…`
    is used *where it sits*: the e2e harness, the `bdd_lint.py`, the playwright-bdd layer, the Makefile
    fragment, the `.gemini` source, the pytest library.
-2. **Root-level assets = copied once** (GitHub Actions, Gemini, and `make` only read these from the repo
-   root, never from a submodule): the caller workflows in `.github/workflows/`, `.gemini/`, and the root
-   `Makefile`. These are copied by `make link-devkit` and committed.
+2. **Root-level assets = copied/symlinked once** (GitHub Actions, Gemini, and `make` only read these from
+   the repo root, never from a submodule): the caller workflows in `.github/workflows/` and `.gemini/` are
+   **copied**; the plugin-facing **skills** are **symlinked** into `.claude/skills/` (Claude Code follows
+   symlinks, so they auto-refresh on a devkit bump). All done by `make link-devkit` and committed. So a
+   developer/agent cloning the plugin gets the machinery *and* the runbook skills (`a0-plugin-e2e-bdd`, …).
 
 ### New repo — the full import (gets everything, including the Makefiles)
 
@@ -42,7 +44,7 @@ fragment `-include`s `e2e/make/bdd.mk`):
 | `make install-hooks` | install a git pre-commit hook that runs `make verify` |
 | `make e2e` | full behaviour suite in the devcontainer — **auto-selects `run-bdd` if `tests/e2e/features/` exists**, else the classic lifecycle; forwards `.devkit.yml e2e_pod_env` seam vars |
 | `make package` / `build` / `up` / `conformance` | package the zip / assemble / boot A0 to explore / assert the frozen targets exist |
-| `make link-devkit` (`link-workflows` + `link-gemini`) | copy the root-level assets |
+| `make link-devkit` (`link-workflows` + `link-gemini` + `link-skills`) | copy/symlink all devkit-shipped assets (workflows, `.gemini`, `.claude/skills`) |
 
 ### Keeping it fresh
 
@@ -51,7 +53,12 @@ fragment `-include`s `e2e/make/bdd.mk`):
   `.gemini` source all update automatically on the bump.
 - **Root-copied files do NOT auto-update** (nightly sync only moves the pin; `GITHUB_TOKEN` can't push
   workflow files). When a caller workflow or `.gemini` styleguide changes upstream, re-run
-  `make link-devkit` and commit.
+  `make link-devkit` and commit. **Skills are the exception** — they're *symlinks* into the submodule, so
+  they refresh automatically when the pin bumps; no re-link needed.
+- **Skills provenance (avoid drift):** `skills/` in the devkit is a *distribution snapshot* of the
+  plugin-facing skills whose **canonical homes are the skill repos** (`agent-zero-operator-skills`, etc.).
+  A maintainer refreshes it before cutting a release: `make sync-skills SKILLS_SRC=/path/to/agent-zero-operator-skills`.
+  Skills with no operator-skills source are devkit-owned and left as-is.
 
 ### The four enforcement layers a consumer gets (fastest-first)
 

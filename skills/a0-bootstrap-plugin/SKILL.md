@@ -85,8 +85,11 @@ git init
 # Add the upstream tool as a submodule
 git submodule add <upstream-repo-url> upstream
 
-# Add the shared plugins-org skills as a submodule
-git submodule add https://github.com/agent-zero-plugins/agent-zero-plugins-skills.git .skills
+# Add the shared operator skills as a submodule
+git submodule add https://github.com/agent-zero-operator/agent-zero-operator-skills.git skills
+
+# Add the plugin devkit as a submodule (tests, BDD gates, e2e, CI) — see §5b
+git submodule add https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit.git tests/_testkit
 ```
 
 ---
@@ -314,6 +317,39 @@ unlink-skills:
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /' | column -t -s ':'
 ```
+
+---
+
+## 5b. Adopt the plugin devkit (BDD gates + e2e + CI)
+
+The devkit submodule (added in §2 as `tests/_testkit`) ships the behaviour-BDD standard and its four
+machine-checked enforcement layers. Wire it in so the new repo gets them from day one.
+
+**Run the one-shot adopter** — it writes the root `Makefile` (the `-include` that brings the frozen e2e
+targets + `verify`/`bdd-lint`) and `.devkit.yml` (inferred from `plugin.yaml`), copies the root-level
+assets (caller workflows + `.gemini`), and installs the pre-commit hook:
+
+```bash
+bash tests/_testkit/init.sh
+git add .gitmodules tests/_testkit Makefile .devkit.yml .github/workflows .gemini && git commit -m "chore: adopt plugin devkit"
+```
+
+(If the repo already has a Makefile, `init.sh` appends the `-include` rather than clobbering it.)
+
+**Declare the e2e seam env** (only if the plugin has agent-driven behaviour) — `init.sh` leaves a
+commented stanza in `.devkit.yml`; uncomment it:
+
+```yaml
+plugin_dir: usr/plugins/<your_plugin>
+display_name: <Your Plugin>
+e2e_pod_env:
+  A0_<YOUR_PLUGIN>_TEST_PROBE: "1"
+```
+
+Now the repo has all four layers, fastest-first: **`make verify` / pre-commit → `.gemini` review →
+CI `plugin-e2e` (lint + seam-off red-proof + e2e) → publish gate**. To author the actual behaviour tests
+(the 4 `docs/spec/` docs, the `.feature` files, the seam), follow the **`a0-plugin-e2e-bdd`** skill; for
+what each gate error means, see `tests/_testkit/docs/BDD-GATES.md`.
 
 ---
 
