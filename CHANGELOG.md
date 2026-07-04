@@ -10,6 +10,13 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.0.1 — 2026-07-04
+
+- **Fix: lint the repo root, not `plugin_dir`.** `bdd_lint` is now run against the repo root (where
+  `tests/e2e/` and `docs/spec/` actually live, per `run-bdd`), fixing subdir-layout plugins
+  (`plugin_dir: usr/plugins/<name>`) where the lint previously looked in the wrong place. No effect on
+  root-layout plugins.
+
 ## v2.0.0 — 2026-07-04  (BREAKING)
 
 - **BDD behaviour tests are now mandatory** (DEC-069). `bdd_lint` **hard-fails a plugin with no
