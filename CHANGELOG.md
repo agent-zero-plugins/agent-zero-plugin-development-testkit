@@ -10,6 +10,21 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.1.2 — 2026-07-04
+
+- **Skills: durable debugging/lifecycle learnings (from the chat-radar v2 adoption).**
+  - `a0-plugin-e2e-bdd` → "Debugging & harness truths": isolate what a symptom *proves* before fixing
+    (renders-blank-live = environment/global-collision; renders-in-pod-but-empty = data/seed, e.g. an
+    `/import_chat` 404); an asserting test can encode the wrong spec intent; harness plumbing (features/
+    flips the harness + retires the seed hook, filesystem seed seam via `A0_CONTAINER`, fresh page +
+    `workers=1` state leak, escape `/` in Cucumber, `BDD_SKIP_INSTALL` hides install-path bugs);
+    admin-merge-past-infra-red discipline; delegate-but-review.
+  - `a0-plugin-architecture` §22 → shared-page/lifecycle/state gotchas: IIFE-wrap inline classic scripts
+    (window-global collision across 30+ plugins); OCI deploy skips install/enable hooks → self-register at
+    a startup seam; gitignore runtime data dirs; no split-brain state; best-effort side-effects must never
+    fail the main path.
+  - `troubleshoot-plugin-deployment` → "setup never ran after OCI deploy" symptom + fix.
+
 ## v2.1.1 — 2026-07-04
 
 - **Skill (`a0-plugin-e2e-bdd`): fixture patterns for seamless UI plugins.** Captures the three patterns

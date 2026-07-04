@@ -820,3 +820,27 @@ The built-in `_plugin_installer` plugin provides the Plugin Hub UI. Users can br
 | Provide a manual action | `execute.py` |
 | Register an MCP server | `hooks.py` → `on_plugin_enabled()` |
 | Distribute agent profiles | `agents/<profile>/agent.yaml` |
+
+## 22. Shared-page, lifecycle & state gotchas (hard-won)
+
+The chat UI loads 30+ plugins onto **one page**, and production plugins are OCI-deployed. Both break
+assumptions that hold in isolation:
+
+- **IIFE-wrap every inline classic `<script>`.** A top-level `var`/`function` in a classic script is a
+  `window` global; with 30+ plugins loaded together, another will clobber a short name (`R`, `CX`) and
+  silently corrupt your state — it renders perfectly standalone and blanks only live. Wrap the script in an
+  IIFE and export **only** the one global you intend. (ES modules are scoped and safe; classic scripts are not.)
+- **OCI-deployed plugins skip the install/enable hooks.** They're unzipped and loaded directly; A0 only
+  auto-calls `uninstall`. So anything a plugin needs set up (scheduled tasks, DB schema, data dirs) **must
+  self-register idempotently at a startup seam** (e.g. a `startup_migration` extension), never rely on
+  `hooks.py → install()`/`on_plugin_enabled()` — those fire on interactive install, not on OCI rollout,
+  and the setup silently never runs in prod.
+- **Gitignore runtime data dirs.** State a plugin writes at runtime (`data/dismissed.json`) leaks into
+  commits and release zips via `git add -A`. Ignore it. And note: test-created state differs between
+  fresh-install (CI) and pre-existing (local) — a common "works locally, red in CI" class.
+- **No split-brain state.** If writes fan out to multiple stores, the **read path must consult the same
+  set**. (Archive wrote to a companion store, but the scan filter + Archived view read only the *dismiss*
+  store → archived chats reappeared and never showed as archived.)
+- **Best-effort side-effects must never fail the main path.** A diagnostics/telemetry write must use a
+  **unique** temp name (no shared `path+".tmp"` race), be wrapped so it can't throw upward, and run only on
+  the **authoritative** pass — not on every poll.
