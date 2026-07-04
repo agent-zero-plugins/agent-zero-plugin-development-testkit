@@ -32,16 +32,19 @@ PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
 
 .PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-skills link-devkit help-devkit
 
-# Which devkit ref to bump to. Empty (default) = the latest release tag (vetted);
-# override for a specific release or bleeding edge:  make update-devkit DEVKIT_REF=v1.2.0
-#                                                     make update-devkit DEVKIT_REF=main
+# Which devkit ref to bump to. Empty (default) = the latest release tag within your
+# MAJOR channel (.devkit.yml `devkit_major`, default 1) — a new MAJOR (e.g. v2, which
+# hard-requires BDD) is opt-in. Override for a specific release or bleeding edge:
+#   make update-devkit DEVKIT_REF=v2.0.0        (deliberately move to the next major)
+#   make update-devkit DEVKIT_REF=main
 DEVKIT_REF ?=
 
-update-devkit: ## bump the vendored devkit to the latest release tag (or DEVKIT_REF) + re-copy assets
+update-devkit: ## bump the devkit to the latest tag in your major channel (or DEVKIT_REF) + re-copy assets
 	@git -C $(DEVKIT_DIR) fetch -q --tags --force origin
-	@ref="$(DEVKIT_REF)"; \
-	 [ -n "$$ref" ] || ref=$$(git -C $(DEVKIT_DIR) tag -l 'v*' --sort=-v:refname | head -1); \
-	 [ -n "$$ref" ] || { echo "[devkit] no release tags yet — falling back to main"; ref=main; git -C $(DEVKIT_DIR) fetch -q origin main; }; \
+	@major=$$(sed -nE 's/^devkit_major:[[:space:]]*"?([0-9]+)"?.*/\1/p' .devkit.yml 2>/dev/null | head -1); major="$${major:-1}"; \
+	 ref="$(DEVKIT_REF)"; \
+	 [ -n "$$ref" ] || ref=$$(git -C $(DEVKIT_DIR) tag -l "v$$major.*" --sort=-v:refname | head -1); \
+	 [ -n "$$ref" ] || { echo "[devkit] no v$$major.* tags yet — falling back to main"; ref=main; git -C $(DEVKIT_DIR) fetch -q origin main; }; \
 	 git -C $(DEVKIT_DIR) checkout -q --detach "$$ref" 2>/dev/null || git -C $(DEVKIT_DIR) checkout -q --detach FETCH_HEAD; \
 	 git add $(DEVKIT_DIR); \
 	 $(MAKE) --no-print-directory link-devkit; \

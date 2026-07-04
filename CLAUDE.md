@@ -74,9 +74,14 @@ submodule bump + `make link-devkit`** — hard the instant a repo is on the new 
 ## Versioning & releases (DEC-067)
 
 The devkit ships **SemVer release tags** (`vMAJOR.MINOR.PATCH`), starting at **v1.0.0**. Consumers track
-the **latest tag**, not `main`: `devkit-sync` bumps the pin to the newest tag nightly, and
-`make update-devkit` defaults to it (override `DEVKIT_REF=vX.Y.Z` or `main`). `main` is the integration
-branch; releases are cut from it.
+the **latest tag within their MAJOR channel**, not `main`: `devkit-sync` and `make update-devkit` bump
+only within the consumer's major (`.devkit.yml devkit_major`, default **1**), so **a new MAJOR is never
+force-adopted** — MINOR/PATCH auto-flow, but moving to the next major is deliberate. `main` is the
+integration branch; releases are cut from it.
+
+- **Opting into a new major** (e.g. **v2.0.0**, which hard-requires BDD tests): `make update-devkit
+  DEVKIT_REF=v2.0.0`, then set `devkit_major: 2` in `.devkit.yml`. Do it when the plugin is ready to meet
+  the new major's requirements — not before.
 
 - **MAJOR** — could fail a previously-green consumer: the frozen Make targets (Appendix E.1), reusable
   workflow inputs/behaviour, the `Makefile.devkit`/`.devkit.yml` interface, or a gate tightening.

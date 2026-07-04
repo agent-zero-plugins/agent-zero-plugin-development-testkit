@@ -79,15 +79,19 @@ jobs:
           GIT_AUTH=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH")
           git "${GIT_AUTH[@]}" submodule update --init "$DEVKIT_PATH"
           before=$(git -C "$DEVKIT_PATH" rev-parse HEAD)
-          # Track the latest release TAG (vetted) — a broken main can't reach the fleet.
-          # Fall back to main only until the devkit's first tag exists.
+          # Track the latest release tag WITHIN A MAJOR CHANNEL — auto-updates get
+          # non-breaking releases; a MAJOR (e.g. v2, which hard-requires BDD) is
+          # opt-in per repo (bump deliberately via `make update-devkit DEVKIT_REF=v2.0.0`).
+          # Channel = .devkit.yml `devkit_major` (default 1) so nobody is force-jumped.
+          MAJOR=$(sed -nE 's/^devkit_major:[[:space:]]*"?([0-9]+)"?.*/\1/p' .devkit.yml 2>/dev/null | head -1)
+          MAJOR="${MAJOR:-1}"
           git -C "$DEVKIT_PATH" "${GIT_AUTH[@]}" fetch --tags --force origin
-          ref=$(git -C "$DEVKIT_PATH" tag -l 'v*' --sort=-v:refname | head -1)
+          ref=$(git -C "$DEVKIT_PATH" tag -l "v$MAJOR.*" --sort=-v:refname | head -1)
           if [ -n "$ref" ]; then
-            echo "target=$ref" >> "$GITHUB_OUTPUT"
+            echo "target=$ref (channel v$MAJOR)" >> "$GITHUB_OUTPUT"
             git -C "$DEVKIT_PATH" checkout --detach "refs/tags/$ref"
           else
-            echo "target=main (no tags yet)" >> "$GITHUB_OUTPUT"
+            echo "target=main (no v$MAJOR.* tags yet)" >> "$GITHUB_OUTPUT"
             git -C "$DEVKIT_PATH" "${GIT_AUTH[@]}" fetch origin main
             git -C "$DEVKIT_PATH" checkout --detach FETCH_HEAD
           fi

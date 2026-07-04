@@ -3,8 +3,8 @@
 
 Hard-fails (exit 1) on any violation of the behaviour-first BDD standard. Runs in
 the `plugin-e2e` workflow before the e2e itself, so a plugin that drifts from the
-standard goes RED on its own PR. Only fires for plugins that ship `tests/e2e/features/`
-(non-BDD plugins are untouched).
+standard goes RED on its own PR. BDD behaviour tests are REQUIRED — a plugin with no
+`tests/e2e/features/` hard-fails (no exceptions; DEC-066 hard-require).
 
 Gates:
   1 feature-purity   — no selectors / DOM ids / internal-API names in Given/When/Then
@@ -35,10 +35,15 @@ def fail(gate: str, loc: str, msg: str) -> None:
     violations.append((gate, loc, msg))
 
 
-# Not a BDD plugin → nothing to enforce.
+# BDD behaviour tests are REQUIRED (DEC-066, hard-require — no exceptions). A plugin
+# with no tests/e2e/features/ has zero behaviour verification; that is a hard fail,
+# not a silent skip. (Authoring guide: the a0-plugin-e2e-bdd skill.)
 if not FEAT_DIR.exists() or not list(FEAT_DIR.glob("*.feature")):
-    print("[bdd-lint] no tests/e2e/features/ — not a BDD plugin, nothing to lint.")
-    sys.exit(0)
+    print("[bdd-lint] ✘ no tests/e2e/features/ — this plugin ships NO behaviour tests.")
+    print("[bdd-lint] BDD behaviour e2e is required (DEC-066). Author it with the a0-plugin-e2e-bdd")
+    print("[bdd-lint] skill, or see tests/_testkit/docs/BDD-GATES.md. A plugin cannot pass with no")
+    print("[bdd-lint] behaviour coverage — 'installs + uninstalls' is not a behaviour assertion.")
+    sys.exit(1)
 
 # ---------------------------------------------------------------- Gate 1: purity
 STEP_KW = re.compile(r"^\s*(Given|When|Then|And|But)\b", re.IGNORECASE)
