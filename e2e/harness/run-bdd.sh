@@ -70,14 +70,16 @@ echo "[run-bdd] red-proof OK — nothing passes without the plugin; the suite is
 PW_RC=0
 ( cd "$BDD" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
 
-# One webm per scenario → artifacts (named by the test-results subdir = scenario).
+# One Playwright trace.zip per captured scenario → artifacts (network + DOM snapshots +
+# console + video + timeline in one file; open with `npx playwright show-trace <file>` or
+# trace.playwright.dev). Default: only failing scenarios (retain-on-failure); BDD_TRACE=on ⇒ all.
 if [ -n "${ARTIFACT_DIR:-}" ]; then
   mkdir -p "$ARTIFACT_DIR"; n=0
   while IFS= read -r f; do
     sub=$(basename "$(dirname "$f")")
     name=$(printf '%s' "$sub" | sed -E 's/-[0-9a-f]{5}-chromium$//; s/-chromium$//; s/[^A-Za-z0-9._-]/-/g')
-    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.webm" && n=$((n+1))
-  done < <(find "$BDD/test-results" -name 'video.webm' 2>/dev/null)
-  echo "[run-bdd] copied $n video(s) to ARTIFACT_DIR"
+    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
+  done < <(find "$BDD/test-results" -name 'trace.zip' 2>/dev/null)
+  echo "[run-bdd] copied $n Playwright trace(s) to ARTIFACT_DIR (BDD_TRACE=${BDD_TRACE:-retain-on-failure}; open with: npx playwright show-trace <file>)"
 fi
 exit $PW_RC

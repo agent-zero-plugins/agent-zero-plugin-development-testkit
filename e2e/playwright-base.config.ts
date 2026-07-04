@@ -49,7 +49,9 @@ export function baseConfig(
     globalSetup: path.resolve(__dirname, "global-setup.ts"),
     use: {
       baseURL: BASE_URL,
-      trace: "retain-on-failure",
+      // Rich single-file artifact (network + DOM snapshots + console + video + timeline).
+      // Default: failing scenarios only; BDD_TRACE=on (capture-all-traces dispatch input) for all.
+      trace: (process.env.BDD_TRACE as any) || "retain-on-failure",
       screenshot: "on",
       // Always record the full lifecycle at a legible resolution so every run
       // produces a video build-artifact (the reviewable e2e flow + DEC-051 media).

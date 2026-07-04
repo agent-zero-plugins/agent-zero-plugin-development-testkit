@@ -11,5 +11,13 @@ const testDir = defineBddConfig({
 });
 export default defineConfig({
   testDir, reporter: [["list"]], timeout: 120000, workers: 1, fullyParallel: false,
-  use: { baseURL: process.env.A0_BASE || "http://localhost:8099", video: "on", screenshot: "on" },
+  // trace = the rich single-file artifact (network + DOM snapshots + console + video + timeline),
+  // viewable via `npx playwright show-trace` / trace.playwright.dev. Default: only failing scenarios
+  // (retain-on-failure); set BDD_TRACE=on (the workflow's capture-all-traces dispatch input) for every one.
+  use: {
+    baseURL: process.env.A0_BASE || "http://localhost:8099",
+    video: "on",
+    screenshot: "on",
+    trace: (process.env.BDD_TRACE as any) || "retain-on-failure",
+  },
 });
