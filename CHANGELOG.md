@@ -10,6 +10,17 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.0.0 — 2026-07-04  (BREAKING)
+
+- **BDD behaviour tests are now mandatory** (DEC-069). `bdd_lint` **hard-fails a plugin with no
+  `tests/e2e/features/`** — the previous "self-skip for non-BDD plugins" was a silent loophole (no tests
+  ⇒ no gate ⇒ green). There is no lifecycle-only escape; every plugin on the devkit must ship behaviour
+  tests. **This is why it's a major bump** — it fails every currently-green non-BDD plugin.
+- **Rollout via a major-version channel** — `devkit-sync` and `make update-devkit` now bump only within
+  your major (`.devkit.yml devkit_major`, default `1`), so the nightly sync never force-jumps a repo to
+  v2. Adopt deliberately: `make update-devkit DEVKIT_REF=v2.0.0` and set `devkit_major: 2`. MINOR/PATCH
+  releases still auto-flow within the channel.
+
 ## v1.1.1 — 2026-07-01
 
 - **Dropped the misleading `sync-skills` make target.** It only searched one source repo, but the

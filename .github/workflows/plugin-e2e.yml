@@ -145,9 +145,10 @@ jobs:
           echo "after reclaim:"; df -h / | tail -1
 
       - name: Tier-1 BDD lint (DEC-066, hard-fail)
-        # Behaviour-first honesty/purity/traceability gates. Self-skips for non-BDD
-        # plugins (no tests/e2e/features/). Runs before the expensive build so a
-        # standard violation fails fast — this is the gate humans + agents can't lazy past.
+        # Behaviour-first honesty/purity/traceability gates + REQUIRES BDD tests:
+        # a plugin with no tests/e2e/features/ hard-fails (no exceptions). Runs before
+        # the expensive build so a standard violation fails fast — the gate humans +
+        # agents can't lazy past.
         env:
           DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
           PLUGIN_DIR: ${{ steps.resolve.outputs.plugin_dir }}

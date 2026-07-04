@@ -1,6 +1,6 @@
 # SPEC — Agent Zero Plugin Quality & Structure Standard
 
-**Status:** Reviewable (iteration 17 — **skills distribution** (DEC-068: the devkit ships the plugin-facing skills, symlinked into .claude/skills/ via link-skills; v1.1.0); iteration 16 — **versioning** (DEC-067: SemVer release tags; consumers track the latest tag; first release **v1.0.0**; CHANGELOG.md); iteration 15 — **enforcement gates** (DEC-066: two-tier machine-checked — Tier-1 lint + seam-off red-proof, Tier-2 verified-publish, merge-guard for free private repos; docs/BDD-GATES.md); iteration 14 — **Cycle 3 PILOT MERGED + PROVEN**: DEC-065 BDD CI harness (`run-bdd.sh` + `plugin-e2e.yml` auto-branch + devcontainer `playwright-bdd`) + fork-robustness rules (real `chat_create` context, overlay-hide-then-real-click); ask-user-question 12/12 BDD scenarios green on the fork in the `plugin-e2e` gate, merged to main; iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
+**Status:** Reviewable (iteration 18 — **BDD mandatory** (DEC-069: bdd_lint hard-fails a plugin with no tests/e2e/features/ — no self-skip loophole; breaking → **v2.0.0**; rollout via a major-version channel so the fleet isn't force-jumped); iteration 17 — **skills distribution** (DEC-068: the devkit ships the plugin-facing skills, symlinked into .claude/skills/ via link-skills; v1.1.0); iteration 16 — **versioning** (DEC-067: SemVer release tags; consumers track the latest tag; first release **v1.0.0**; CHANGELOG.md); iteration 15 — **enforcement gates** (DEC-066: two-tier machine-checked — Tier-1 lint + seam-off red-proof, Tier-2 verified-publish, merge-guard for free private repos; docs/BDD-GATES.md); iteration 14 — **Cycle 3 PILOT MERGED + PROVEN**: DEC-065 BDD CI harness (`run-bdd.sh` + `plugin-e2e.yml` auto-branch + devcontainer `playwright-bdd`) + fork-robustness rules (real `chat_create` context, overlay-hide-then-real-click); ask-user-question 12/12 BDD scenarios green on the fork in the `plugin-e2e` gate, merged to main; iteration 13 — **Cycle 3: spec-driven BDD e2e** (§5.14 / DEC-059–064) — the per-repo 5-step pipeline, behaviour-first BDD, the 4-doc artifact model, plugin-specific/common split, playwright-bdd batteries-included from the devkit (linked not duplicated), deterministic behaviour-trigger seams; gold standard = ask-user-question; iteration 12 — DEC-058 behaviour groups on loggedInPage + fire-and-forget openModal (fixed a 300s fixture hang); iteration 11 — DEC-057 pod-env test-seam enablement + no-silent-swallow honesty rule, after the context-scoping pilot caught hollow coverage; iteration 10 — Cycle-1 SHIPPED, 19/19 fan-out done; Cycle-2 (§5.7–5.13 / DEC-045–054) drafted + post-SPEC-REVIEW-002 sweep; **theme-4 fork analysis resolved by a 19-subagent audit** — two-tier fork model (DEC-049/054), **18 `upstream` / 1 `fork-required`** (context-scoping), all high confidence, `docs/a0-compatibility.md`; **fork-first e2e** DEC-055 — default image = the fork, stock upstream added later as a 2nd target)
 
 > **Cycle-2 (2026-06-20) — authoring & polish standard.** Cycle-1 proved the harness and
 > standardized every repo's *CI interface*. Cycle-2 standardizes what an author and a user
@@ -1030,7 +1030,9 @@ advisory; make it enforced, because humans and AI agents both cut corners. **Tie
 (every `@skip` has a tracked reason; no swallowed `catch`/`.catch`; the four `docs/spec` docs exist), and
 **traceability** (every `BEH-n` in `behaviour-spec.md` is covered in `e2e.feature.md` or tracked-skipped);
 plus the **seam-off red-proof** in `run-bdd.sh` — run the suite once with the plugin NOT installed and
-assert **0** pass (any pass plugin-less is fake-green). Self-skips non-BDD plugins. **Tier-2 (gate,
+assert **0** pass (any pass plugin-less is fake-green). **BDD behaviour tests are REQUIRED** — a plugin
+with no `tests/e2e/features/` hard-fails (no exceptions, DEC-069); "installs + uninstalls" is not a
+behaviour assertion. **Tier-2 (gate,
 `agent-zero-vendor-plugins` publish):** **verified-publish** — optional `meta.yaml` `source_repo` +
 `source_commit`; when present, publish hard-fails unless the `plugin-e2e` check was green on that commit
 (the gate holds only zips, so it asks GitHub "was the upstream check green?"). **Private-repo merge:**
@@ -1063,6 +1065,17 @@ skill repos (`a0-plugin-e2e-bdd` → `agent-zero-operator-skills`; most others �
 `a0-plugin-testkit` vendored). A maintainer **manually copies** the changed skill from the right repo into
 `skills/` before a release (no automated sync target — the split sources would make a one-source helper
 misleading). Shipped in devkit **v1.1.0**; the misleading `sync-skills` target was dropped in **v1.1.1**.
+
+**DEC-069 — BDD behaviour tests are mandatory (hard-require), rolled out via a major-version channel.**
+Corrects DEC-066's original "self-skip non-BDD plugins" — that was a silent loophole (no tests ⇒ no gate
+⇒ green), exactly the laziness the gates exist to close. Now: **`bdd_lint` hard-fails a plugin with no
+`tests/e2e/features/`** — every plugin on the devkit MUST ship behaviour tests; there is no
+lifecycle-only escape (the classic install/uninstall check is not behaviour verification). Because this
+would fail every currently-green non-BDD consumer, it is a **breaking change → v2.0.0**, and rollout is
+**opt-in per repo via a major-version channel**: `devkit-sync` and `make update-devkit` bump only within
+the consumer's major (`.devkit.yml devkit_major`, default **1**), so the nightly sync never force-jumps a
+repo to v2. A plugin adopts the mandate deliberately when it's ready — `make update-devkit DEVKIT_REF=v2.0.0`
+(and sets `devkit_major: 2`). Non-breaking releases (MINOR/PATCH) still auto-flow within the channel.
 
 ---
 
