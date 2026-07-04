@@ -17,6 +17,11 @@ on:
   pull_request:
     branches: ["main", "master"]
   workflow_dispatch:
+    inputs:
+      capture_all_traces:
+        description: "Capture a Playwright trace for EVERY scenario (not just failures)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,3 +31,5 @@ jobs:
   e2e:
     uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
     secrets: inherit
+    with:
+      capture-all-traces: ${{ inputs.capture_all_traces || false }}

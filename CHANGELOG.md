@@ -10,6 +10,17 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.1.0 — 2026-07-04
+
+- **Playwright traces replace the webm→GIF artifact.** Every captured scenario now ships a single
+  `trace.zip` (network + DOM snapshots + console + video + timeline), viewable with
+  `npx playwright show-trace <file>` or trace.playwright.dev. Both harnesses (`run-bdd`, `run-lifecycle`)
+  collect `trace.zip`; the flaky `ffmpeg`→GIF step is gone. Artifact renamed `e2e-recording-*` → `e2e-traces-*`.
+- **Capture scope:** failing scenarios by default (`retain-on-failure`). Run the `plugin-e2e` workflow via
+  **workflow_dispatch with `capture_all_traces: true`** to capture a trace for *every* scenario
+  (threads through to `BDD_TRACE=on`). Locally: `BDD_TRACE=on make e2e`.
+- Consumers re-run `make link-workflows` to pick up the new dispatch input (the default already flows via `@main`).
+
 ## v2.0.1 — 2026-07-04
 
 - **Fix: lint the repo root, not `plugin_dir`.** `bdd_lint` is now run against the repo root (where

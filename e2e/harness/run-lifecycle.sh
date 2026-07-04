@@ -52,20 +52,19 @@ export A0_POD_ENV="${A0_POD_ENV:-}"             # plugin-declared nested-A0 env 
 PW_RC=0
 ( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
 
-# Collect e2e media to the writable artifact mount, even on failure. The lifecycle
-# is MULTI-SPEC: Playwright records ONE video per test (install / behaviour:<group> /
-# uninstall), so copy them ALL, named by their test-results subdir (the test title)
-# so each behaviour group's video is distinct.
+# Collect e2e traces (the rich single-file artifact: network + DOM snapshots + console +
+# video + timeline) to the writable artifact mount, even on failure. One trace.zip per
+# captured spec, named by its test-results subdir. Default: failing specs only; BDD_TRACE=on ⇒ all.
 if [ -n "${ARTIFACT_DIR:-}" ]; then
   mkdir -p "$ARTIFACT_DIR"
   n=0
   while IFS= read -r f; do
     sub=$(basename "$(dirname "$f")")        # e.g. lifecycle-lifecycle-behaviour-<group>-<hash>-chromium
     name=$(printf '%s' "$sub" | sed -E 's/^lifecycle-lifecycle-//; s/-[0-9a-f]{5}-chromium$//; s/-chromium$//')
-    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.webm" && n=$((n+1))
-  done < <(find "$WORK/lifecycle/test-results" -name 'video.webm' 2>/dev/null)
+    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
+  done < <(find "$WORK/lifecycle/test-results" -name 'trace.zip' 2>/dev/null)
   cp "${A0_REPORT_DIR:-/tmp}"/behaviour-*.png "$ARTIFACT_DIR/" 2>/dev/null || true
-  echo "[run-lifecycle] copied $n video(s) + $(ls "$ARTIFACT_DIR"/*.png 2>/dev/null | wc -l) screenshot(s) to ARTIFACT_DIR"
+  echo "[run-lifecycle] copied $n trace(s) + $(ls "$ARTIFACT_DIR"/*.png 2>/dev/null | wc -l) screenshot(s) to ARTIFACT_DIR (open: npx playwright show-trace <file>)"
 fi
 exit $PW_RC
 
