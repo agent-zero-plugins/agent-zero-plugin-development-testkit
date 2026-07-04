@@ -151,8 +151,9 @@ jobs:
         # agents can't lazy past.
         env:
           DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
-          PLUGIN_DIR: ${{ steps.resolve.outputs.plugin_dir }}
-        run: python3 "$DEVKIT_PATH/e2e/lint/bdd_lint.py" "$PLUGIN_DIR"
+        # tests/e2e/ + docs/spec/ are repo-root artifacts (per run-bdd), not under
+        # plugin_dir — lint the repo root so subdir-layout plugins work.
+        run: python3 "$DEVKIT_PATH/e2e/lint/bdd_lint.py" .
 
       - name: Build devkit devcontainer (rootless)
         env:
