@@ -18,8 +18,8 @@ PLUGIN_DIR ?= .
 
 verify: bdd-lint ## Pre-commit verification — the Tier-1 static gates (fast, no A0)
 
-bdd-lint: ## Behaviour-BDD honesty/purity/traceability gates (self-skips non-BDD plugins)
-	@python3 "$(DEVKIT_DIR)/e2e/lint/bdd_lint.py" "$(PLUGIN_DIR)"
+bdd-lint: ## Behaviour-BDD honesty/purity/traceability gates (requires BDD tests — hard-fails if none)
+	@python3 "$(DEVKIT_DIR)/e2e/lint/bdd_lint.py" .
 
 bdd-e2e: ## Full local BDD run — alias for `make e2e` (auto-selects the run-bdd harness)
 	@$(MAKE) e2e 2>/dev/null || { \
