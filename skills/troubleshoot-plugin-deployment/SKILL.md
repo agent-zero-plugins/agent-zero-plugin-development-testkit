@@ -260,6 +260,19 @@ it but the old code still runs, one of:
 
 ---
 
+## "The plugin loads, but its setup never ran (scheduled task / schema / dir missing)"
+
+**OCI-deployed plugins do NOT fire the install/enable hooks.** The pod unzips + loads the plugin directly;
+A0 only auto-calls `uninstall`. So `hooks.py → install()` / `on_plugin_enabled()` run on *interactive*
+install but **not** on OCI rollout — any setup they do (registering a scheduled task, creating schema/dirs,
+seeding config) silently never happens in prod.
+
+- **Tell-tale:** works after a manual install in a dev A0 (hooks fired), missing after an OCI deploy.
+- **Fix:** self-register idempotently at a **startup seam** (e.g. a `startup_migration` extension that runs
+  every boot and no-ops if already set up), not in the enable lifecycle. See `a0-plugin-architecture` §22.
+
+---
+
 ## Related Skills
 
 - **plugin-manifest-contract**: The rules every plugin obeys

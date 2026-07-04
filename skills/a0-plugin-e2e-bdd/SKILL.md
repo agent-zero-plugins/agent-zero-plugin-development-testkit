@@ -158,6 +158,41 @@ These bit the pilot and will bite again — bake them into the step layer:
 - **Re-affirm context if needed.** When a poll depends on the active context, keep the loop honest:
   assert the context until the expected UI actually surfaces, rather than assuming one `setContext` sticks.
 
+## Debugging & harness truths (hard-won)
+
+**Isolate what a symptom *proves* before fixing it.** Two "render bugs" that weren't:
+- *Renders in every harness, blank only on the live multi-plugin page* → an **environment** bug, not a
+  render bug (a classic inline `<script>` leaked ~40 top-level `var`/functions onto `window`; another of
+  the 30+ plugins clobbered one and corrupted the geometry). Stop reproducing in isolation — the harness
+  gives a false all-clear. (Fix: IIFE-wrap inline scripts — see `a0-plugin-architecture`.)
+- *Renders fine standalone AND in the live pod, but empty* → a **data** bug (the BDD seed POSTed to
+  `/import_chat`, which A0 doesn't implement → 404 → zero chats). Before touching the renderer, confirm
+  the data landed. "Renders fine standalone + in-pod" is itself a result: it rules out the code and points
+  at environment/data/seed.
+
+**A failing/asserting test can encode the *wrong* behaviour.** A BDD suite that "caught a bug" may be
+asserting the wrong spec intent ("must not re-nag after dismissal" read as *hide forever* when the spec
+meant a *per-open summary*). When a fix is driven by *inferred* intent, confirm the intent — ambiguous
+spec language is a landmine, and a green test can be green about the wrong thing.
+
+**Harness plumbing (BDD adoption):**
+- Creating `tests/e2e/features/` **silently flips** the harness (`run-lifecycle.sh` → `run-bdd.sh`),
+  retiring `behaviour.mjs` and the classic seed hook — **move the seed** when you adopt BDD.
+- The **browser can't seed** aged / id-stable fixtures (no in-app import API). Seed via the **filesystem
+  seam** — `podman exec` writing `chat.json` — which the step process can do because the harness exports
+  `A0_CONTAINER`.
+- Each scenario gets a **fresh unauthenticated page**; `workers=1` shares **one** A0, so scenarios **leak
+  state** into each other — namespace/reset per scenario, don't assume a clean slate.
+- Cucumber treats `/` as regex **alternation** — escape it in step text.
+- The light local loop (`BDD_SKIP_INSTALL`) **hides install-path bugs** — a fresh-install crash only
+  surfaced in the full CI flow. Run the full install path before trusting green.
+
+**Merge & delegation discipline:**
+- Admin-merging past **infra-red** CI is legitimate ONLY when the code is independently verified (pytest +
+  standalone render) AND the red is provably **infra** (stale submodule / nested-boot flake), not the change.
+- Delegate heavy isolated work (nested-A0 repro, harness fix loops) to keep the coordinating context clean —
+  but **review the output**: a plausible-but-wrong "fix" slips in exactly there.
+
 ## Build the seam (recipe)
 
 A test-only API handler that triggers the *real* behaviour with no LLM, gated on for e2e only.
