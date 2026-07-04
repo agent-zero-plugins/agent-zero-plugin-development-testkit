@@ -90,6 +90,38 @@ Fold step-4 and step-5 review findings back in before committing. Commit all fou
 LLM turn (deterministic stub) is used only when a behaviour is genuinely un-seamable. The seam lives in
 the **step layer / plugin test surface**, never in the `.feature`.
 
+## Fixture patterns for seamless UI plugins (pick by shape)
+
+Many plugins have **no** agent-driven behaviour and need **no seam** — just a real trigger for a UI that
+renders client-side. Three patterns cover almost all of them; pick by the plugin's shape:
+
+- **Pure-UI control** — a `chat-top-end` button/toggle (share-chat, fullscreen-toggle). Provision a real
+  chat (see fork-robustness below) so the toolbar mounts, click the control, assert the **DOM effect**: a
+  `body` class, a spied `navigator.clipboard.writeText`, a `.copied` accent. No injection needed.
+- **Render-a-code-block** — a `sidebar-end` renderer that turns ` ```mermaid `/` ```diff ` fences into
+  SVG / side-by-side (mermaid-diagrams, diff-visualizer). Inject the exact node A0's markdown renderer
+  emits (`.markdown-block-wrap > .code-block-wrapper > pre > code.language-<lang>`) as a **new** DOM node
+  so the plugin's `MutationObserver` fires. Three traps, all real:
+  1. **Wait for the renderer to load *before* injecting.** These import their lib from a CDN; the observer
+     is installed only after that resolves. Inject too early and the mutation is missed (observers don't
+     see pre-existing nodes). A fixed `waitForTimeout(~9s)` after page load is enough.
+  2. **Assert the rendered *output*, not a `data-…-processed` marker.** The renderer usually **replaces**
+     the source code block, deleting any marker on it. Poll the stable output (`.d2h-wrapper`, the mermaid
+     `<svg>`) — the marker is a transient that vanishes.
+  3. **Feed a *valid* payload.** diff2html renders nothing without a full git diff (`diff --git a/… b/…`
+     + `index …` headers), not just `---/+++`.
+- **Store-driven** — a plugin whose value lives in its own store (chat-comments). Drive the plugin's
+  **public store methods** exactly as the UI does (`window.Alpine.store("<name>")`: set the draft field,
+  call the action) and assert **observable effects**: a badge count, **persistence across a reload** (the
+  backend load/save round-trip), the prompt box (`#chat-input`). This tests real create/persist/send
+  without simulating raw text-selection. It's a legitimate trigger (the same entry point the UI calls),
+  not state-poking — provided the *assertion* is on the observable effect, never the internal array.
+
+**Local A0 boot gotcha.** A host-podman stock A0 (`agent0ai/agent-zero`) is killed on boot by a failing
+`run_sshd` (a supervisor listener kills the whole container on any FATAL child). Neutralize it in the
+entrypoint: `printf '#!/bin/sh\nexec tail -f /dev/null\n' > /usr/sbin/sshd`. And re-run
+`npx playwright install chromium` after any browser-cache eviction.
+
 ## Batteries-included from the devkit (don't rebuild, link)
 
 The devkit ships the playwright-bdd runner/config, the shared step library, and the **common lifecycle
