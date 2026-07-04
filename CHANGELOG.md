@@ -10,6 +10,15 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.1.1 — 2026-07-04
+
+- **Skill (`a0-plugin-e2e-bdd`): fixture patterns for seamless UI plugins.** Captures the three patterns
+  proven across share-chat / fullscreen-toggle / mermaid-diagrams / diff-visualizer / chat-comments —
+  pure-UI control, render-a-code-block (inject the node A0 emits; wait for the CDN renderer *before*
+  injecting; assert the rendered output, not the transient `data-…-processed` marker; feed diff2html a
+  full git diff), and store-driven (drive public store methods, assert observable effects) — plus the
+  local-A0 boot gotcha (neutralize `run_sshd`; reinstall chromium after cache eviction).
+
 ## v2.1.0 — 2026-07-04
 
 - **Playwright traces replace the webm→GIF artifact.** Every captured scenario now ships a single
