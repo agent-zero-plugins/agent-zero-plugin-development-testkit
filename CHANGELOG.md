@@ -10,6 +10,14 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.1.3 — 2026-07-10
+
+- **Fix: ESM-safe type imports in the e2e page objects.** `ChatPage`/`PluginsPage`/`LoginPage` value-imported
+  the type-only `Locator`/`Page` exports from `@playwright/test`. That crashes with
+  `does not provide an export named 'Locator'` when a consumer repo's `tests/e2e/package.json` declares
+  `"type": "module"` (e.g. a pre-existing spec suite), which flips the whole step-import chain to strict ESM.
+  Now `import type`. Surfaced by gitnexus's v2 adoption.
+
 ## v2.1.2 — 2026-07-04
 
 - **Skills: durable debugging/lifecycle learnings (from the chat-radar v2 adoption).**
