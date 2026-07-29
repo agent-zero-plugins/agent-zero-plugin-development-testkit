@@ -1,0 +1,41 @@
+name: Bug report
+description: Something in the devkit is broken (assertion, harness, workflow, devcontainer)
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - pytest assertions / a0_plugin_testkit package
+        - e2e harness (lifecycle / BDD / fixtures / pages)
+        - reusable workflows (plugin-e2e / devkit-sync)
+        - devcontainer
+        - templates / skills / docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the failing command and full error output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Devkit version / submodule commit
+      placeholder: v2.1.3 / 5714ce6
+    validations:
+      required: true
+  - type: input
+    id: consumer
+    attributes:
+      label: Consumer plugin repo (if applicable)

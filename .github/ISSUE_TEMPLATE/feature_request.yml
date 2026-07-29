@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a new assertion, harness capability, or workflow improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What plugin-development pain does this solve? Link a real bug it would have caught if possible (red-first).
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: checkboxes
+    id: spec
+    attributes:
+      label: SPEC impact
+      options:
+        - label: This change needs a new/amended REQ or DEC in SPEC.md

@@ -1,5 +1,11 @@
 # agent-zero-plugin-development-testkit
 
+[![sample-plugin-e2e](https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit/actions/workflows/sample-plugin-e2e.yml/badge.svg?branch=main)](https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit/actions/workflows/sample-plugin-e2e.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/tag/agent-zero-plugins/agent-zero-plugin-development-testkit?label=release)](https://github.com/agent-zero-plugins/agent-zero-plugin-development-testkit/tags)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 **The devkit: the single source of truth for how Agent Zero plugins are built, tested, documented,
 and shipped — and the shared machinery that enforces that standard across the whole plugin fleet.**
 
@@ -23,6 +29,49 @@ templates. A plugin author writes *their plugin's behaviour* — everything comm
 2. **The machinery that delivers it** — the devcontainer, the reusable GitHub Actions workflows, the
    pytest assertion library, and the playwright e2e layers (lifecycle + BDD). Plugins consume these by
    reference; they never copy them.
+
+---
+
+## Architecture at a glance
+
+```mermaid
+flowchart TB
+    subgraph devkit["agent-zero-plugin-development-testkit (this repo)"]
+        SPEC["SPEC.md<br/>REQ/DEC contract — the standard"]
+        PKG["a0_plugin_testkit<br/>pytest assertion library"]
+        HARNESS["e2e/harness + e2e/bdd<br/>lifecycle & BDD runners"]
+        DC["devcontainer/<br/>reproducible build+test image"]
+        WF["reusable workflows<br/>plugin-e2e.yml · devkit-sync.yml"]
+        SKILLS["skills/ + templates/<br/>authoring guidance"]
+    end
+
+    subgraph consumer["Consumer plugin repo (one per plugin)"]
+        PLUGIN["usr/plugins/&lt;name&gt;<br/>the plugin itself"]
+        SUB["tests/_testkit<br/>vendored devkit submodule"]
+        CALLER["thin caller workflow<br/>(copied from templates/)"]
+    end
+
+    subgraph ci["CI (GitHub Actions)"]
+        NESTED["nested rootless A0<br/>(the real deploy image)"]
+        LIFE["install → verify → uninstall"]
+        BDD["BDD scenarios (.feature)"]
+    end
+
+    SPEC -.governs.-> PLUGIN
+    devkit -->|git submodule| SUB
+    CALLER -->|workflow_call| WF
+    WF --> DC
+    DC --> NESTED
+    NESTED --> LIFE
+    NESTED --> BDD
+    PKG -->|fast static checks| PLUGIN
+    HARNESS --> BDD
+    WF -.nightly sync.-> SUB
+```
+
+One repo defines the standard **and** ships the machinery that enforces it; every plugin repo
+vendors the machinery and calls the same reusable CI gate, so a plugin proven green here is proven
+green on the image we actually deploy.
 
 ---
 
