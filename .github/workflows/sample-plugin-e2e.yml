@@ -35,10 +35,12 @@ jobs:
         run: podman build -t plugin-devkit:ci -f devcontainer/Containerfile devcontainer
 
       - name: Package sample + run lifecycle (A0 nested, unprivileged)
-        # Validates DEC-055 fork-first: boots the PRIVATE non-root fork image
-        # (ghcr.io/nuevanext/agent-zero:latest-nonroot) via the harness ghcr login.
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        # Boots the PUBLIC upstream image (docker.io/agent0ai/agent-zero:latest) —
+        # the A0_IMAGE default from DEC-019. This job must pass with NO secrets:
+        # dependabot runs and fork PRs from outside contributors never receive
+        # them, so pinning the private fork image here made this workflow red for
+        # everyone outside the org. Consumers that need the ML-bundled fork still
+        # override A0_IMAGE per-plugin via .devkit.yml.
         run: |
           set -euo pipefail
           mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
@@ -56,9 +58,7 @@ jobs:
             -e PLUGIN_NAME=sample_plugin \
             -e HOOK_DIR=/workspace/examples/sample-plugin/tests/e2e/hooks \
             -e BEHAVIOUR_FILE=/workspace/examples/sample-plugin/tests/e2e/behaviour.mjs \
-            -e A0_IMAGE="ghcr.io/nuevanext/agent-zero:latest-nonroot" \
-            -e GHCR_USER=x \
-            -e GHCR_TOKEN="$GHCR_TOKEN" \
+            -e A0_IMAGE="docker.io/agent0ai/agent-zero:latest" \
             -e ARTIFACT_DIR=/artifacts \
             plugin-devkit:ci \
             -lc 'bash /workspace/e2e/harness/run-lifecycle.sh'
