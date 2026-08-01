@@ -1,0 +1,89 @@
+# publish-devkit-image — build & publish the devkit harness image to GHCR (PUBLIC).
+#
+# WHY THIS EXISTS (DEC-071):
+#   `e2e/Makefile.devkit` defaults DEVKIT_IMAGE to
+#   ghcr.io/agent-zero-plugins/plugin-devkit:latest, but nothing ever published
+#   it — the package did not exist, so every consumer's `make e2e` died with
+#   "manifest unknown" and CI only worked because each workflow rebuilt the
+#   image inline (~85s per run, every run).
+#
+# PUBLIC ON PURPOSE:
+#   The image is quay.io/podman/stable + Node + Playwright + Fedora browser
+#   libs. It contains NO secrets and NO first-party source. Publishing it
+#   publicly means an outside contributor can run the documented local loop
+#   with no GHCR auth at all — the single most important consumability
+#   property for this repo.
+name: publish-devkit-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "devcontainer/Containerfile"
+      - ".github/workflows/publish-devkit-image.yml"
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Least privilege: this job only needs to read the repo and write the package.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-devkit-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        # GITHUB_TOKEN suffices: the package lives in THIS repo's org and the
+        # job declares packages:write. No PAT, no long-lived secret.
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          podman build -t devkit:build -f devcontainer/Containerfile devcontainer
+
+      - name: Tag and push
+        run: |
+          set -euo pipefail
+          IMAGE=ghcr.io/${{ github.repository_owner }}/plugin-devkit
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')   # GHCR requires lowercase
+          SHA_TAG="sha-${GITHUB_SHA::12}"
+
+          podman tag devkit:build "$IMAGE:$SHA_TAG"
+          podman push "$IMAGE:$SHA_TAG"
+          echo "pushed $IMAGE:$SHA_TAG"
+
+          # :latest tracks main. Tag builds additionally publish the version.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VER="${GITHUB_REF_NAME#v}"
+            podman tag devkit:build "$IMAGE:$VER"
+            podman push "$IMAGE:$VER"
+            echo "pushed $IMAGE:$VER"
+          fi
+
+          podman tag devkit:build "$IMAGE:latest"
+          podman push "$IMAGE:latest"
+          echo "pushed $IMAGE:latest"
+
+      - name: Verify the image is pullable ANONYMOUSLY
+        # The whole point of publishing is the no-auth consumer path, so prove
+        # it rather than assume it. A fresh logged-out store is the only honest
+        # check: a cached layer or a live login would mask a private package.
+        run: |
+          set -euo pipefail
+          IMAGE=ghcr.io/${{ github.repository_owner }}/plugin-devkit
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          podman logout ghcr.io || true
+          if podman pull --authfile /dev/null "$IMAGE:latest"; then
+            echo "anonymous pull OK — consumers need no GHCR auth"
+          else
+            echo "::error::$IMAGE:latest is NOT anonymously pullable. Set the package visibility to Public (Org -> Packages -> plugin-devkit -> Package settings -> Change visibility). Until then every consumer's 'make e2e' fails with 'manifest unknown'."
+            exit 1
+          fi
