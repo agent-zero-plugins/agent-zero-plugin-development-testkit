@@ -81,7 +81,13 @@ jobs:
           IMAGE=ghcr.io/${{ github.repository_owner }}/plugin-devkit
           IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
           podman logout ghcr.io || true
-          if podman pull --authfile /dev/null "$IMAGE:latest"; then
+          # Use an EMPTY-JSON authfile, not /dev/null: podman parses the
+          # authfile as JSON, so /dev/null yields
+          #   "unmarshaling JSON at \"/dev/null\": unexpected end of JSON input"
+          # — a parse error that fails the step regardless of package
+          # visibility, masquerading as an auth failure.
+          AUTHFILE="$(mktemp)"; echo '{"auths":{}}' > "$AUTHFILE"
+          if podman pull --authfile "$AUTHFILE" "$IMAGE:latest"; then
             echo "anonymous pull OK — consumers need no GHCR auth"
           else
             echo "::error::$IMAGE:latest is NOT anonymously pullable. Set the package visibility to Public (Org -> Packages -> plugin-devkit -> Package settings -> Change visibility). Until then every consumer's 'make e2e' fails with 'manifest unknown'."
