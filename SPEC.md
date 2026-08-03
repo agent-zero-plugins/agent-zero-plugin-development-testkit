@@ -1077,6 +1077,38 @@ the consumer's major (`.devkit.yml devkit_major`, default **1**), so the nightly
 repo to v2. A plugin adopts the mandate deliberately when it's ready — `make update-devkit DEVKIT_REF=v2.0.0`
 (and sets `devkit_major: 2`). Non-breaking releases (MINOR/PATCH) still auto-flow within the channel.
 
+**DEC-073 — e2e traces are captured on every run, not just failures.**
+`trace: "retain-on-failure"` meant a **passing** run produced no trace at all, so there was no ground
+truth to diff a later regression against and a scenario could only be diagnosed *after* it had already
+broken. Traces are now **always on**; the storage cost is bounded by the uploader's retention (and by
+DEC-074's count policy), not by discarding green runs. Overridable per-run via `BDD_TRACE`.
+Corollary — the **collectors must ship what Playwright writes**: `screenshot: "on"` and `video: "on"`
+were already capturing `.png`/`.webm` next to each `trace.zip`, but both harnesses (`run-bdd.sh` and
+`run-lifecycle.sh`) copied *only* `trace.zip`, so those files were silently dropped and the downstream
+"video → GIF" step had never produced anything. Both now collect traces + screenshots + videos,
+scenario-prefixed for attributability.
+
+**DEC-074 — Artifact retention is count-based ("keep the last N runs"), enforced, not configured.**
+GitHub has **no native keep-last-N setting** — `retention-days` is the only built-in control and it is
+purely time-based, so under a variable CI cadence it cannot express "the last N executions". The policy
+is therefore enforced explicitly: after upload, a prune step lists the live artifacts of that name
+newest-first and deletes everything past `artifact-keep` (**default 5**). `retention-days` is raised to
+**90** as a pure backstop so the *prune*, not expiry, decides what disappears — a short retention would
+otherwise race the policy and delete one of the N first.
+Constraints that shape the implementation: (a) it needs `actions: write`, and a reusable workflow's job
+permissions are **capped by the caller's grant**, so the caller template must grant it too or the prune
+silently degrades to a warning; (b) fork PRs get a read-only token, so the prune is skipped there
+(their artifacts belong to the fork anyway); (c) the step is `continue-on-error` — retention
+housekeeping must never turn a green e2e red. Applied to both the reusable `plugin-e2e.yml` and the
+devkit's own `sample-plugin-e2e.yml` self-test.
+**Propagation debt:** consumers hold a *copy* of the caller template and `devkit-sync` deliberately
+never writes `.github/workflows/` (its `GITHUB_TOKEN` cannot), so existing consumers keep the old
+caller until `make link-workflows` is re-run. Until then their prune warns rather than prunes —
+visible and non-fatal by design.
+
+> **Numbering note:** DEC-070–072 were introduced as code comments only and were never written up
+> here. This section documents 073–074; backfilling 070–072 is tracked separately.
+
 ---
 
 ## Appendix B — Open questions
