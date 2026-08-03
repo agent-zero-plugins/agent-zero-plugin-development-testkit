@@ -16,6 +16,13 @@ jobs:
   sample-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      # actions:write is needed ONLY to DELETE superseded artifacts for the
+      # count-based retention prune (DEC-074).
+      actions: write
+    env:
+      ARTIFACT_KEEP: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -85,4 +92,50 @@ jobs:
           name: e2e-recording-sample
           path: artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          # Backstop only. The real policy is count-based (keep last N runs) and
+          # is enforced by the prune step below — GitHub has NO native "keep last
+          # N artifacts" setting, retention-days is the only built-in control.
+          # Kept long so the prune step, not expiry, decides what disappears.
+          retention-days: 90
+
+      - name: Prune old e2e recordings (keep last N runs)
+        # Count-based retention (DEC-074), mirroring the reusable plugin-e2e.yml.
+        # Without this the self-test workflow accumulates one artifact per run
+        # forever (25 live before this was added), and time-based expiry — not
+        # the policy — decides what survives.
+        #
+        # On fork PRs the token is read-only, so deletion is skipped rather than
+        # failing the run; the step is continue-on-error so retention housekeeping
+        # can never turn a green e2e red.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ env.ARTIFACT_KEEP }}
+          ART_NAME: e2e-recording-sample
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.pull_request.head.repo.fork || false }}" = "true" ]; then
+            echo "fork PR — token is read-only, skipping prune"; exit 0
+          fi
+          # Newest-first list of this artifact name, excluding already-expired ones.
+          mapfile -t ids < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+              -q ".artifacts[] | select(.name == \"${ART_NAME}\") | select(.expired == false) | \"\(.created_at) \(.id)\"" \
+            | sort -r | awk '{print $2}'
+          )
+          total=${#ids[@]}
+          echo "found $total live artifact(s) named ${ART_NAME}; keeping newest ${KEEP}"
+          if [ "$total" -le "$KEEP" ]; then
+            echo "nothing to prune"; exit 0
+          fi
+          deleted=0
+          for id in "${ids[@]:$KEEP}"; do
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted+1))
+            else
+              echo "::warning::could not delete artifact ${id} (insufficient permission?)"
+            fi
+          done
+          echo "pruned ${deleted} artifact(s), kept ${KEEP}"

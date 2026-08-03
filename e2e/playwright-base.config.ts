@@ -50,8 +50,12 @@ export function baseConfig(
     use: {
       baseURL: BASE_URL,
       // Rich single-file artifact (network + DOM snapshots + console + video + timeline).
-      // Default: failing scenarios only; BDD_TRACE=on (capture-all-traces dispatch input) for all.
-      trace: (process.env.BDD_TRACE as any) || "retain-on-failure",
+      // Always captured (DEC-073): storage cost is bounded by the uploader's
+      // retention-days, not by discarding green runs. retain-on-failure meant a
+      // passing run produced NO trace, so there was no ground truth to diff a
+      // later regression against — and a scenario could only ever be diagnosed
+      // after it had already broken. Override with BDD_TRACE if needed.
+      trace: (process.env.BDD_TRACE as any) || "on",
       screenshot: "on",
       // Always record the full lifecycle at a legible resolution so every run
       // produces a video build-artifact (the reviewable e2e flow + DEC-051 media).

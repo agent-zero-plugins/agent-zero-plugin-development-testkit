@@ -10,6 +10,27 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## Unreleased
+
+- **Fix: e2e runs uploaded a near-empty artifact.** Two independent defects, both of which made a
+  *green* run undiagnosable. (1) `trace: retain-on-failure` meant a passing run produced no trace at
+  all, so there was no ground truth to diff a later regression against — traces are now **always
+  captured** (DEC-073), still overridable via `BDD_TRACE`. (2) Both harnesses (`run-bdd.sh` **and**
+  `run-lifecycle.sh`) copied only `trace.zip`, silently dropping the `.png`/`.webm` Playwright writes
+  next to it — `screenshot: "on"`/`video: "on"` were always capturing them, nothing shipped them. As a
+  result the sample workflow's "convert video → GIF" step had never produced a single GIF. Both
+  collectors now ship traces + screenshots + videos, scenario-prefixed and suffix-preserving.
+  Measured on the devkit's own self-test: 4 files uploaded before, traces+shots+videos after.
+- **New: count-based artifact retention — keep the last N runs** (DEC-074). GitHub has no native
+  keep-last-N setting (`retention-days` is time-based only), so the policy is enforced by an explicit
+  prune step after upload. New `artifact-keep` input on `plugin-e2e.yml` (**default 5**);
+  `retention-days` raised to 90 as a pure backstop so the prune — not expiry — decides what
+  disappears. Also applied to the devkit's own `sample-plugin-e2e.yml`, which had no count policy at
+  all and had accumulated 25 live artifacts.
+  **Consumer action:** the prune needs `actions: write`, and a reusable workflow's permissions are
+  capped by the **caller's** grant. Re-run `make link-workflows` to pick up the updated caller
+  template; until then the prune warns instead of pruning (non-fatal by design).
+
 ## v2.1.3 — 2026-07-10
 
 - **Fix: ESM-safe type imports in the e2e page objects.** `ChatPage`/`PluginsPage`/`LoginPage` value-imported

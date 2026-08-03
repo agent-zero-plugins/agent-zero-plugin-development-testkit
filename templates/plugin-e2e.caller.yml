@@ -26,6 +26,7 @@ on:
 permissions:
   contents: read
   pull-requests: write   # merge-guard drafts a PR whose plugin-e2e is red
+  actions: write         # DEC-074 count-based artifact retention: delete superseded e2e artifacts
 
 jobs:
   e2e:

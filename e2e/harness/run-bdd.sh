@@ -137,12 +137,27 @@ fi
 # console + video + timeline in one file; open with `npx playwright show-trace <file>` or
 # trace.playwright.dev). Default: only failing scenarios (retain-on-failure); BDD_TRACE=on ⇒ all.
 if [ -n "${ARTIFACT_DIR:-}" ]; then
-  mkdir -p "$ARTIFACT_DIR"; n=0
+  mkdir -p "$ARTIFACT_DIR"; n=0; shots=0; vids=0
   while IFS= read -r f; do
     sub=$(basename "$(dirname "$f")")
     name=$(printf '%s' "$sub" | sed -E 's/-[0-9a-f]{5}-chromium$//; s/-chromium$//; s/[^A-Za-z0-9._-]/-/g')
     cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
   done < <(find "$BDD/test-results" -name 'trace.zip' 2>/dev/null)
-  echo "[run-bdd] copied $n Playwright trace(s) to ARTIFACT_DIR (BDD_TRACE=${BDD_TRACE:-retain-on-failure}; open with: npx playwright show-trace <file>)"
+  # Screenshots + videos are written NEXT TO the traces, and were previously
+  # dropped on the floor: only trace.zip was collected, so a green run (which
+  # under the old retain-on-failure produced no trace at all) uploaded an EMPTY
+  # artifact. `screenshot: "on"` was always capturing them — nothing shipped them.
+  # Keep the scenario dir in the name so shots stay attributable, and de-collide
+  # repeats (test-failed-1.png, -2.png, ...) rather than overwriting.
+  while IFS= read -r f; do
+    sub=$(basename "$(dirname "$f")")
+    name=$(printf '%s' "$sub" | sed -E 's/-[0-9a-f]{5}-chromium$//; s/-chromium$//; s/[^A-Za-z0-9._-]/-/g')
+    base=$(basename "$f")
+    case "$base" in
+      *.png) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && shots=$((shots+1)) ;;
+      *.webm) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && vids=$((vids+1)) ;;
+    esac
+  done < <(find "$BDD/test-results" \( -name '*.png' -o -name '*.webm' \) 2>/dev/null)
+  echo "[run-bdd] copied $n trace(s), $shots screenshot(s), $vids video(s) to ARTIFACT_DIR (BDD_TRACE=${BDD_TRACE:-on}; open a trace with: npx playwright show-trace <file>)"
 fi
 exit $PW_RC

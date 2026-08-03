@@ -19,6 +19,11 @@ on:
         required: false
         type: string
         default: "ghcr.io/nuevanext/agent-zero:latest-nonroot"
+      artifact-keep:
+        description: "Count-based artifact retention: keep this many most recent runs' e2e artifacts (DEC-074)."
+        required: false
+        type: number
+        default: 5
       devkit-submodule-path:
         description: "Path to the vendored devkit submodule."
         required: false
@@ -44,6 +49,14 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      # actions:write is needed ONLY to DELETE superseded artifacts for the
+      # count-based retention prune (DEC-074). A reusable workflow's job
+      # permissions are capped by what the CALLER granted, so the caller
+      # template must grant actions:write too or the prune silently degrades
+      # to a warning (the step is continue-on-error and never fails the run).
+      actions: write
     steps:
       - name: Mint App token (read-only — devkit submodule clone)
         id: app-token
@@ -238,7 +251,52 @@ jobs:
           name: e2e-traces-${{ steps.resolve.outputs.plugin_name }}
           path: artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          # Backstop only. The real policy is count-based (keep last N runs) and
+          # is enforced by the prune step below — GitHub has NO native "keep last
+          # N artifacts" setting, retention-days is the only built-in control.
+          # Kept long so the prune step, not expiry, decides what disappears.
+          retention-days: 90
+
+      - name: Prune old e2e artifacts (keep last N runs)
+        # Count-based retention (DEC-074): keep the newest E2E_ARTIFACT_KEEP runs'
+        # artifacts for THIS workflow+plugin and delete the rest, so "the last N
+        # executions" are always available regardless of how often CI runs.
+        #
+        # Needs actions:write. On fork PRs the token is read-only, so deletion is
+        # skipped rather than failing the run — nothing to prune there anyway,
+        # since a fork PR's artifacts belong to the fork.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ inputs.artifact-keep }}
+          ART_NAME: e2e-traces-${{ steps.resolve.outputs.plugin_name }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.pull_request.head.repo.fork || false }}" = "true" ]; then
+            echo "fork PR — token is read-only, skipping prune"; exit 0
+          fi
+          # Newest-first list of this artifact name, excluding already-expired ones.
+          mapfile -t ids < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+              -q ".artifacts[] | select(.name == \"${ART_NAME}\") | select(.expired == false) | \"\(.created_at) \(.id)\"" \
+            | sort -r | awk '{print $2}'
+          )
+          total=${#ids[@]}
+          echo "found $total live artifact(s) named ${ART_NAME}; keeping newest ${KEEP}"
+          if [ "$total" -le "$KEEP" ]; then
+            echo "nothing to prune"; exit 0
+          fi
+          deleted=0
+          for id in "${ids[@]:$KEEP}"; do
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted+1))
+            else
+              echo "::warning::could not delete artifact ${id} (insufficient permission?)"
+            fi
+          done
+          echo "pruned ${deleted} artifact(s), kept ${KEEP}"
 
   merge-guard:
     # Free private repos can't use required status checks (paid feature), so block

@@ -54,17 +54,36 @@ PW_RC=0
 
 # Collect e2e traces (the rich single-file artifact: network + DOM snapshots + console +
 # video + timeline) to the writable artifact mount, even on failure. One trace.zip per
-# captured spec, named by its test-results subdir. Default: failing specs only; BDD_TRACE=on ⇒ all.
+# captured spec, named by its test-results subdir. Traces are always captured (DEC-073).
+#
+# Playwright also writes .png and .webm NEXT TO each trace.zip. This collector used to
+# copy only trace.zip (plus the behaviour-*.png the spec itself renders), so screenshots
+# and the recorded video were dropped on the floor — the same defect fixed in run-bdd.sh.
+# The GIF step downstream globs artifacts/*.webm and silently produced nothing.
 if [ -n "${ARTIFACT_DIR:-}" ]; then
   mkdir -p "$ARTIFACT_DIR"
-  n=0
+  n=0; shots=0; vids=0
   while IFS= read -r f; do
     sub=$(basename "$(dirname "$f")")        # e.g. lifecycle-lifecycle-behaviour-<group>-<hash>-chromium
     name=$(printf '%s' "$sub" | sed -E 's/^lifecycle-lifecycle-//; s/-[0-9a-f]{5}-chromium$//; s/-chromium$//')
     cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
   done < <(find "$WORK/lifecycle/test-results" -name 'trace.zip' 2>/dev/null)
-  cp "${A0_REPORT_DIR:-/tmp}"/behaviour-*.png "$ARTIFACT_DIR/" 2>/dev/null || true
-  echo "[run-lifecycle] copied $n trace(s) + $(ls "$ARTIFACT_DIR"/*.png 2>/dev/null | wc -l) screenshot(s) to ARTIFACT_DIR (open: npx playwright show-trace <file>)"
+  # Keep the spec dir in the name so shots/videos stay attributable, and preserve
+  # Playwright's -1/-2 suffixes rather than overwriting repeats.
+  while IFS= read -r f; do
+    sub=$(basename "$(dirname "$f")")
+    name=$(printf '%s' "$sub" | sed -E 's/^lifecycle-lifecycle-//; s/-[0-9a-f]{5}-chromium$//; s/-chromium$//')
+    base=$(basename "$f")
+    case "$base" in
+      *.png)  cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && shots=$((shots+1)) ;;
+      *.webm) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && vids=$((vids+1)) ;;
+    esac
+  done < <(find "$WORK/lifecycle/test-results" \( -name '*.png' -o -name '*.webm' \) 2>/dev/null)
+  # Spec-rendered behaviour screenshots (DEC-051 media), written outside test-results.
+  for f in "${A0_REPORT_DIR:-/tmp}"/behaviour-*.png; do
+    [ -e "$f" ] && cp "$f" "$ARTIFACT_DIR/" && shots=$((shots+1))
+  done
+  echo "[run-lifecycle] copied $n trace(s), $shots screenshot(s), $vids video(s) to ARTIFACT_DIR (open a trace: npx playwright show-trace <file>)"
 fi
 exit $PW_RC
 
