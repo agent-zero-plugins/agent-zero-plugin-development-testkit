@@ -137,6 +137,42 @@ jobs:
           echo "pod_env=$pod_env"             >> "$GITHUB_OUTPUT"
           echo "Resolved: dir=$plugin_dir name=$plugin_name display='$display_name' a0=$a0_image pod_env='$pod_env'"
 
+      - name: Prefetch A0 image (background)
+        # The A0 image is the single biggest serial cost in this job (~5m48s
+        # observed for the fork image: 4.61GB / 34 compressed layers; upstream
+        # public is 3.16GB / 23). It was previously pulled implicitly by
+        # a0-up.sh's `podman run`, i.e. AFTER free-disk + BDD lint + devkit
+        # build had already run serially — none of which need the image.
+        #
+        # Start the pull NOW, in the background, so it overlaps those steps.
+        # Podman's local storage is shared across steps on the runner, so
+        # a0-up.sh's later `podman run` finds the image already present and
+        # does not re-pull.
+        #
+        # Deliberately NOT a GitHub Actions cache: at 3-4.6GB the save/restore
+        # of the image tar is not reliably cheaper than the registry pull, and
+        # it would consume most of the repo's 10GB cache budget. Overlapping is
+        # a guaranteed win; caching is a gamble.
+        #
+        # Non-fatal by design: if this pull fails (auth, transient registry),
+        # the sentinel records it and a0-up.sh pulls exactly as it did before.
+        env:
+          A0_IMAGE: ${{ steps.resolve.outputs.a0_image }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -n "${GHCR_TOKEN:-}" ] && case "$A0_IMAGE" in ghcr.io/*) true;; *) false;; esac; then
+            printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u x --password-stdin >/dev/null 2>&1 \
+              || echo "prefetch: ghcr login failed — leaving the pull to a0-up.sh"
+          fi
+          nohup bash -c '
+            if podman pull "'"$A0_IMAGE"'" >/tmp/a0-prefetch.log 2>&1; then
+              echo ok > /tmp/a0-prefetch.status
+            else
+              echo fail > /tmp/a0-prefetch.status
+            fi' >/dev/null 2>&1 &
+          echo "prefetch started for $A0_IMAGE (pid $!)"
+
       - name: Free disk space
         # The fork image (ghcr.io/nuevanext/agent-zero, bundles ML deps e.g.
         # onnxruntime) is larger than upstream's 8.76GB and exhausts the runner

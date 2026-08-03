@@ -47,6 +47,27 @@ if [ -n "${GHCR_TOKEN:-}" ]; then
     || { echo "[a0-up] ghcr login failed (check GHCR_PULL_TOKEN: read:packages on NuevaNext)" >&2; exit 1; }
 fi
 
+# If CI started a background prefetch of the image (plugin-e2e.yml), wait for it
+# to finish rather than racing it — two concurrent pulls of the same 3-4.6GB
+# image are strictly worse than one. Purely opportunistic: no sentinel (local
+# runs, other callers) ⇒ fall straight through and let `podman run` pull as
+# before. A failed prefetch is also just a fall-through.
+if [ -f /tmp/a0-prefetch.log ] || [ -f /tmp/a0-prefetch.status ]; then
+  _waited=0
+  while [ ! -f /tmp/a0-prefetch.status ] && [ "$_waited" -lt "${PREFETCH_WAIT:-900}" ]; do
+    sleep 5; _waited=$(( _waited + 5 ))
+  done
+  if [ -f /tmp/a0-prefetch.status ]; then
+    log "image prefetch: $(cat /tmp/a0-prefetch.status) (waited ${_waited}s)"
+  else
+    log "image prefetch still running after ${_waited}s — proceeding, podman will reuse or finish the pull"
+  fi
+fi
+
+if podman image exists "$A0_IMAGE" 2>/dev/null; then
+  log "image already present locally — no pull needed"
+fi
+
 log "booting $A0_IMAGE (nested, rootless, host-net) as '$A0_NAME'"
 podman run -d --name "$A0_NAME" --network=host \
   -e AUTH_LOGIN="$AUTH_LOGIN" -e AUTH_PASSWORD="$AUTH_PASSWORD" \
