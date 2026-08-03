@@ -9,3 +9,7 @@ build/
 dist/
 .venv/
 node_modules/
+# Also match a node_modules SYMLINK: the trailing-slash pattern above only
+# matches real directories, so a symlink (e.g. e2e/node_modules -> a shared
+# dep cache) slips past it and gets committed. Seen in PR #45.
+node_modules
