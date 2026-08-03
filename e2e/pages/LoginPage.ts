@@ -34,8 +34,16 @@ export class LoginPage {
     // A0 redirects to `/` on success. We assert on a post-login landmark
     // (the top-nav "Plugins" button) rather than the URL alone, so a
     // silent auth failure shows up as a timeout on this line.
+    //
+    // Explicit 30s (DEC-072): on a cold nested A0 the WebUI hydrates ~5s AFTER
+    // the post-login redirect, straddling Playwright's 5s default and flaking
+    // ~50%. Measured from run 30721063715's trace: page reached `/` at t=2.4s,
+    // top-nav rendered at t=7.755s — the default deadline (~7.4s) missed it by
+    // ~350ms. This wait exists to surface a SILENT AUTH FAILURE, not to measure
+    // hydration speed, so bound it generously — consistent with PluginsPage's
+    // 8s/20s/10s landmark waits.
     await expect(
       this.page.getByRole("button", { name: "Plugins", exact: true }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
   }
 }

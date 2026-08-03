@@ -53,13 +53,27 @@ export A0_USERNAME="${A0_USERNAME:-admin}" A0_PASSWORD="${A0_PASSWORD:-admin}"
 # plugin, the behaviour scenarios must NOT pass — the seam endpoint 404s without the
 # plugin, so honest scenarios go RED. Any pass here is fake-green. Cheap: one extra
 # playwright pass, no second A0 boot.
+# SPEED (DEC-070): the red-proof's cost is ENTIRELY in the fail path. With no
+# plugin the seam 404s, so every scenario runs until something times out — and
+# the binding clock is Playwright's TEST-level timeout (120s), not the action /
+# expect timeouts: a step's explicit per-call `{ timeout: N }` (which plugin
+# steps routinely pass) is NOT overridable from config, but IS capped by the
+# test timeout. Measured: 12 scenarios x ~113s = 22m40s ~= 12 x the 120s cap.
+# So cap the test timeout for the red-proof pass only. Semantics are untouched:
+# every scenario still runs, and the assertion is still exactly 0 passes.
+RED_PROOF_TIMEOUT_MS="${RED_PROOF_TIMEOUT_MS:-30000}"
 RP_LOG="$(mktemp)"
-( cd "$BDD" && BDD_SKIP_INSTALL=1 npx playwright test --config=playwright.config.ts ) > "$RP_LOG" 2>&1 || true
+rp_t0=$SECONDS
+( cd "$BDD" && BDD_SKIP_INSTALL=1 npx playwright test --config=playwright.config.ts \
+    --timeout="$RED_PROOF_TIMEOUT_MS" ) > "$RP_LOG" 2>&1 || true
+rp_secs=$(( SECONDS - rp_t0 ))
 # NB: 0-passed is the SUCCESS case and prints no "N passed" line, so BOTH greps
 # exit non-zero on empty input; with pipefail that propagates, so `|| true` must
 # guard the WHOLE pipeline (not just the first grep) or set -e kills the script.
 RP_PASSED=$(grep -oE '[0-9]+ passed' "$RP_LOG" | grep -oE '[0-9]+' | head -1 || true); RP_PASSED=${RP_PASSED:-0}
-echo "[run-bdd] red-proof: $RP_PASSED scenario(s) passed with NO plugin installed (want 0)"
+RP_TOTAL=$(grep -oE 'Running [0-9]+ test' "$RP_LOG" | grep -oE '[0-9]+' | head -1 || true); RP_TOTAL=${RP_TOTAL:-0}
+echo "[run-bdd] red-proof: $RP_PASSED scenario(s) passed with NO plugin installed (want 0) \
+— $RP_TOTAL scenario(s) run in ${rp_secs}s (test-timeout cap ${RED_PROOF_TIMEOUT_MS}ms)"
 if [ "$RP_PASSED" -gt 0 ]; then
   echo "::error::seam-off red-proof FAILED — $RP_PASSED behaviour scenario(s) passed with no plugin installed (fake-green). See tests/_testkit/docs/BDD-GATES.md (Gate 3)."
   grep -aE '✓|passed|failed' "$RP_LOG" | tail -20
@@ -68,7 +82,56 @@ fi
 echo "[run-bdd] red-proof OK — nothing passes without the plugin; the suite is real."
 
 PW_RC=0
-( cd "$BDD" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
+PW_LOG="$(mktemp)"
+( cd "$BDD" && npx playwright test --config=playwright.config.ts ) 2>&1 | tee "$PW_LOG" || true
+PW_RC=${PIPESTATUS[0]}
+
+# ── Anti-weakening guards on the speed-up (DEC-070) ───────────────────────────
+# Capping the red-proof clock is only safe while a scenario that WOULD pass
+# plugin-less still has room to pass. If the cap clipped such a scenario into a
+# timeout-failure, the gate would report 0-passed and go green while a fake-green
+# scenario sat undetected — a silently weakened gate. Two checks make that
+# impossible to happen unnoticed.
+PW_TOTAL=$(grep -oE 'Running [0-9]+ test' "$PW_LOG" | grep -oE '[0-9]+' | head -1 || true); PW_TOTAL=${PW_TOTAL:-0}
+
+# Guard A — coverage parity: the red-proof must exercise the SAME scenario count
+# as the real run. Catches any future change that narrows the red-proof pass
+# (a filter, a project split, a grep) rather than merely speeding it up.
+if [ "$RP_TOTAL" -ne "$PW_TOTAL" ]; then
+  echo "::error::red-proof coverage MISMATCH — red-proof ran $RP_TOTAL scenario(s) but the real run ran $PW_TOTAL. The red-proof must cover every behaviour scenario (DEC-066/070)."
+  exit 1
+fi
+
+# Guard B — cap adequacy: every scenario that genuinely PASSES in the real run
+# must complete well inside the red-proof cap. If the slowest honest pass needs
+# more time than the cap allows, the cap is capable of masking a fake-green, so
+# fail loudly with the value to raise it to. 80% leaves headroom for the extra
+# waiting a plugin-less run does before its own failure.
+# Parse the per-scenario durations Playwright prints at end-of-line, e.g. "(18.5s)".
+# POSIX sed + shell arithmetic ONLY — deliberately no gawk-style 3-arg match():
+# the harness runs wherever the devkit image runs and mawk (Debian's default awk)
+# rejects that GNU extension outright, which would make this guard a syntax error
+# at runtime rather than a check. Verified against real CI log output.
+SLOWEST_PASS_MS=0
+while read -r v u; do
+  case "$u" in
+    ms) ms=${v%.*} ;;
+    s)  ms=$(( ${v%%.*} * 1000 + 10#$(printf '%s' "${v#*.}0" | cut -c1-1) * 100 )) ;;
+    m)  ms=$(( ${v%%.*} * 60000 )) ;;
+    *)  ms=0 ;;
+  esac
+  [ "$ms" -gt "$SLOWEST_PASS_MS" ] && SLOWEST_PASS_MS=$ms
+done <<EOF
+$(grep -a '✓' "$PW_LOG" | sed -nE 's/.*\(([0-9.]+)(ms|s|m)\)[[:space:]]*$/\1 \2/p')
+EOF
+SLOWEST_PASS_MS=${SLOWEST_PASS_MS:-0}
+BUDGET_MS=$(( RED_PROOF_TIMEOUT_MS * 80 / 100 ))
+echo "[run-bdd] red-proof cap check: slowest PASSING scenario ${SLOWEST_PASS_MS}ms vs 80% of cap ${BUDGET_MS}ms"
+if [ "$SLOWEST_PASS_MS" -gt "$BUDGET_MS" ]; then
+  need=$(( SLOWEST_PASS_MS * 100 / 80 / 1000 * 1000 + 1000 ))
+  echo "::error::red-proof timeout cap TOO TIGHT — a passing scenario takes ${SLOWEST_PASS_MS}ms but the red-proof cap is ${RED_PROOF_TIMEOUT_MS}ms. A scenario that passes plugin-less could be clipped into a false failure, masking a fake-green. Raise RED_PROOF_TIMEOUT_MS to >= ${need}."
+  exit 1
+fi
 
 # One Playwright trace.zip per captured scenario → artifacts (network + DOM snapshots +
 # console + video + timeline in one file; open with `npx playwright show-trace <file>` or
