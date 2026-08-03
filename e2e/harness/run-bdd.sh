@@ -15,6 +15,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"   # e2e/harness
+# shellcheck source=./_artifacts.sh
+. "$HERE/_artifacts.sh"
 export A0_NAME="${A0_NAME:-a0-lifecycle}"
 export INSTANCE_ENV="${INSTANCE_ENV:-/tmp/a0-instance.env}"
 : "${PLUGIN_ZIP:?set PLUGIN_ZIP}"
@@ -133,31 +135,9 @@ if [ "$SLOWEST_PASS_MS" -gt "$BUDGET_MS" ]; then
   exit 1
 fi
 
-# One Playwright trace.zip per captured scenario → artifacts (network + DOM snapshots +
-# console + video + timeline in one file; open with `npx playwright show-trace <file>` or
-# trace.playwright.dev). Default: only failing scenarios (retain-on-failure); BDD_TRACE=on ⇒ all.
-if [ -n "${ARTIFACT_DIR:-}" ]; then
-  mkdir -p "$ARTIFACT_DIR"; n=0; shots=0; vids=0
-  while IFS= read -r f; do
-    sub=$(basename "$(dirname "$f")")
-    name=$(printf '%s' "$sub" | sed -E 's/-[0-9a-f]{5}-chromium$//; s/-chromium$//; s/[^A-Za-z0-9._-]/-/g')
-    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
-  done < <(find "$BDD/test-results" -name 'trace.zip' 2>/dev/null)
-  # Screenshots + videos are written NEXT TO the traces, and were previously
-  # dropped on the floor: only trace.zip was collected, so a green run (which
-  # under the old retain-on-failure produced no trace at all) uploaded an EMPTY
-  # artifact. `screenshot: "on"` was always capturing them — nothing shipped them.
-  # Keep the scenario dir in the name so shots stay attributable, and de-collide
-  # repeats (test-failed-1.png, -2.png, ...) rather than overwriting.
-  while IFS= read -r f; do
-    sub=$(basename "$(dirname "$f")")
-    name=$(printf '%s' "$sub" | sed -E 's/-[0-9a-f]{5}-chromium$//; s/-chromium$//; s/[^A-Za-z0-9._-]/-/g')
-    base=$(basename "$f")
-    case "$base" in
-      *.png) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && shots=$((shots+1)) ;;
-      *.webm) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && vids=$((vids+1)) ;;
-    esac
-  done < <(find "$BDD/test-results" \( -name '*.png' -o -name '*.webm' \) 2>/dev/null)
-  echo "[run-bdd] copied $n trace(s), $shots screenshot(s), $vids video(s) to ARTIFACT_DIR (BDD_TRACE=${BDD_TRACE:-on}; open a trace with: npx playwright show-trace <file>)"
-fi
+# Traces + screenshots + videos → artifacts. Shared with run-lifecycle.sh via
+# _artifacts.sh: these two harnesses used to keep separate copies of this block,
+# they drifted, and a fix applied to one left the other broken.
+collect_playwright_artifacts "$BDD/test-results" "${ARTIFACT_DIR:-}" "$PLUGIN_NAME"
+[ -n "${ARTIFACT_DIR:-}" ] && report_collected "run-bdd"
 exit $PW_RC

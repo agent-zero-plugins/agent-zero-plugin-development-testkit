@@ -35,12 +35,19 @@ on:
         type: boolean
         default: false
     secrets:
+      # DEC-075: all three are now OPTIONAL. They were `required: true` back when
+      # the devkit was a PRIVATE repo and the submodule could only be cloned with
+      # an App token. The devkit is public now (verified: anonymous clone works),
+      # so the token buys nothing — while `required: true` made every Dependabot
+      # PR structurally red, because Dependabot runs never receive repo secrets.
+      # Symptom was "Input required and not supplied: app-id" on 5 open PRs, none
+      # of which had anything to do with the dependency being bumped.
       SKILLS_SYNC_APP_CLIENT_ID:
-        description: "Sync App OAuth Client ID (to clone the private devkit)."
-        required: true
+        description: "Sync App OAuth Client ID. Optional/legacy — only used if the devkit submodule is private."
+        required: false
       SKILLS_SYNC_APP_PRIVATE_KEY:
-        description: "Sync App private-key PEM."
-        required: true
+        description: "Sync App private-key PEM. Optional/legacy — see above."
+        required: false
       GHCR_PULL_TOKEN:
         description: "ghcr read:packages token to pull the private fork image (DEC-055). Optional — without it the e2e runs on the public default image."
         required: false
@@ -60,6 +67,10 @@ jobs:
     steps:
       - name: Mint App token (read-only — devkit submodule clone)
         id: app-token
+        # Only when the App credentials are actually present. Dependabot runs and
+        # fork PRs get no secrets, and the devkit is public, so they skip this and
+        # clone the submodule anonymously below (DEC-075).
+        if: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID != '' && secrets.SKILLS_SYNC_APP_PRIVATE_KEY != '' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           client-id: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
@@ -71,14 +82,25 @@ jobs:
         with:
           submodules: false
 
-      - name: Init devkit submodule (App token)
+      - name: Init devkit submodule
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        # The devkit is a PUBLIC repo, so the plain clone is the normal path and
+        # works with no credentials at all — which is what lets Dependabot PRs
+        # (no secrets) and outside contributors run this workflow. The App token
+        # is used only when it happens to be available, so a consumer that keeps
+        # its devkit private still works unchanged (DEC-075).
         run: |
-          AUTH=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
-            submodule update --init "$DEVKIT_PATH"
+          set -euo pipefail
+          if [ -n "${APP_TOKEN:-}" ]; then
+            AUTH=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+              submodule update --init "$DEVKIT_PATH"
+          else
+            echo "no App token (Dependabot/fork/public devkit) — cloning submodule anonymously"
+            git submodule update --init "$DEVKIT_PATH"
+          fi
 
       - name: Build plugin (optional — .devkit.yml `build:`)
         # Build-generated plugins (e.g. a vendored upstream compiled into a
@@ -271,32 +293,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KEEP: ${{ inputs.artifact-keep }}
           ART_NAME: e2e-traces-${{ steps.resolve.outputs.plugin_name }}
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event.pull_request.head.repo.fork || false }}" = "true" ]; then
-            echo "fork PR — token is read-only, skipping prune"; exit 0
-          fi
-          # Newest-first list of this artifact name, excluding already-expired ones.
-          mapfile -t ids < <(
-            gh api --paginate \
-              "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
-              -q ".artifacts[] | select(.name == \"${ART_NAME}\") | select(.expired == false) | \"\(.created_at) \(.id)\"" \
-            | sort -r | awk '{print $2}'
-          )
-          total=${#ids[@]}
-          echo "found $total live artifact(s) named ${ART_NAME}; keeping newest ${KEEP}"
-          if [ "$total" -le "$KEEP" ]; then
-            echo "nothing to prune"; exit 0
-          fi
-          deleted=0
-          for id in "${ids[@]:$KEEP}"; do
-            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
-              deleted=$((deleted+1))
-            else
-              echo "::warning::could not delete artifact ${id} (insufficient permission?)"
-            fi
-          done
-          echo "pruned ${deleted} artifact(s), kept ${KEEP}"
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork || false }}
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        # Single definition, shared with the devkit's own sample-plugin-e2e.yml.
+        run: bash "${DEVKIT_PATH}/e2e/ci/prune-artifacts.sh"
 
   merge-guard:
     # Free private repos can't use required status checks (paid feature), so block
