@@ -1106,8 +1106,30 @@ never writes `.github/workflows/` (its `GITHUB_TOKEN` cannot), so existing consu
 caller until `make link-workflows` is re-run. Until then their prune warns rather than prunes —
 visible and non-fatal by design.
 
+**DEC-075 — CI must be runnable with no secrets at all.**
+Every secret the e2e needs is now **optional**, and each step that consumes one is guarded on its
+presence. The App-token dance existed because the devkit was a *private* repo whose submodule could
+only be cloned with a token; the devkit is public now (verified by an anonymous clone), so the token
+buys nothing on the default path. Leaving the secrets `required: true` had a cost that was invisible
+until it was looked for: **Dependabot runs never receive repo secrets**, so all five open dependency
+PRs across the fleet failed with `Input required and not supplied: app-id` — a failure that had
+nothing to do with the dependency being bumped, and which made every bump unverifiable. The same
+property is what lets an outside contributor's fork PR run the suite at all, which is a precondition
+for open-sourcing. A consumer that keeps its devkit private is unaffected: when the App credentials
+are present they are still used.
+
+**DEC-076 — Shared logic lives in one file, not in two workflows.**
+The artifact collector was duplicated across `run-bdd.sh` and `run-lifecycle.sh`, and the retention
+prune across `plugin-e2e.yml` and `sample-plugin-e2e.yml`. This is not a style preference: the
+collector copies had silently **drifted** (only one sanitised non-alphanumerics in scenario names,
+so artifacts from the other carried raw `→` in their filenames), and when the "green runs upload an
+empty artifact" defect was fixed in one copy the other kept it — the fix was reported as complete
+while half the fleet was still broken. Collector → `e2e/harness/_artifacts.sh`, sourced by both
+harnesses; prune → `e2e/ci/prune-artifacts.sh`, invoked by both workflows. A reusable workflow can
+call the script from the consumer's vendored devkit path, so there is still exactly one definition.
+
 > **Numbering note:** DEC-070–072 were introduced as code comments only and were never written up
-> here. This section documents 073–074; backfilling 070–072 is tracked separately.
+> here. This section documents 073–076; backfilling 070–072 is tracked separately.
 
 ---
 

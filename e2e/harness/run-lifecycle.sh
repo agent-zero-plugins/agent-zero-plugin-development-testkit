@@ -14,6 +14,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"   # e2e/harness
+# shellcheck source=./_artifacts.sh
+. "$HERE/_artifacts.sh"
 E2E_DIR="$(cd "$HERE/.." && pwd)"       # e2e
 LIFECYCLE_DIR="$E2E_DIR/lifecycle"
 export A0_NAME="${A0_NAME:-a0-lifecycle}"
@@ -52,39 +54,18 @@ export A0_POD_ENV="${A0_POD_ENV:-}"             # plugin-declared nested-A0 env 
 PW_RC=0
 ( cd "$WORK/lifecycle" && npx playwright test --config=playwright.config.ts ) || PW_RC=$?
 
-# Collect e2e traces (the rich single-file artifact: network + DOM snapshots + console +
-# video + timeline) to the writable artifact mount, even on failure. One trace.zip per
-# captured spec, named by its test-results subdir. Traces are always captured (DEC-073).
+# Traces + screenshots + videos → artifacts. Shared with run-bdd.sh via
+# _artifacts.sh: these two harnesses used to keep separate copies of this block,
+# they drifted (only one sanitised scenario names), and a fix applied to one left
+# the other broken — a green run still shipped 0 screenshots and 0 videos.
 #
-# Playwright also writes .png and .webm NEXT TO each trace.zip. This collector used to
-# copy only trace.zip (plus the behaviour-*.png the spec itself renders), so screenshots
-# and the recorded video were dropped on the floor — the same defect fixed in run-bdd.sh.
-# The GIF step downstream globs artifacts/*.webm and silently produced nothing.
-if [ -n "${ARTIFACT_DIR:-}" ]; then
-  mkdir -p "$ARTIFACT_DIR"
-  n=0; shots=0; vids=0
-  while IFS= read -r f; do
-    sub=$(basename "$(dirname "$f")")        # e.g. lifecycle-lifecycle-behaviour-<group>-<hash>-chromium
-    name=$(printf '%s' "$sub" | sed -E 's/^lifecycle-lifecycle-//; s/-[0-9a-f]{5}-chromium$//; s/-chromium$//')
-    cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}.trace.zip" && n=$((n+1))
-  done < <(find "$WORK/lifecycle/test-results" -name 'trace.zip' 2>/dev/null)
-  # Keep the spec dir in the name so shots/videos stay attributable, and preserve
-  # Playwright's -1/-2 suffixes rather than overwriting repeats.
-  while IFS= read -r f; do
-    sub=$(basename "$(dirname "$f")")
-    name=$(printf '%s' "$sub" | sed -E 's/^lifecycle-lifecycle-//; s/-[0-9a-f]{5}-chromium$//; s/-chromium$//')
-    base=$(basename "$f")
-    case "$base" in
-      *.png)  cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && shots=$((shots+1)) ;;
-      *.webm) cp "$f" "$ARTIFACT_DIR/${PLUGIN_NAME}-${name}--${base}" && vids=$((vids+1)) ;;
-    esac
-  done < <(find "$WORK/lifecycle/test-results" \( -name '*.png' -o -name '*.webm' \) 2>/dev/null)
-  # Spec-rendered behaviour screenshots (DEC-051 media), written outside test-results.
-  for f in "${A0_REPORT_DIR:-/tmp}"/behaviour-*.png; do
-    [ -e "$f" ] && cp "$f" "$ARTIFACT_DIR/" && shots=$((shots+1))
-  done
-  echo "[run-lifecycle] copied $n trace(s), $shots screenshot(s), $vids video(s) to ARTIFACT_DIR (open a trace: npx playwright show-trace <file>)"
-fi
+# The strip expression removes the doubled "lifecycle-lifecycle-" prefix
+# Playwright generates for this suite; run-bdd needs no such strip.
+collect_playwright_artifacts "$WORK/lifecycle/test-results" "${ARTIFACT_DIR:-}" \
+  "$PLUGIN_NAME" 's/^lifecycle-lifecycle-//'
+# Spec-rendered behaviour screenshots (DEC-051 media), written outside test-results.
+collect_extra_screenshots "${A0_REPORT_DIR:-/tmp}" "${ARTIFACT_DIR:-}" 'behaviour-*.png'
+[ -n "${ARTIFACT_DIR:-}" ] && report_collected "run-lifecycle"
 exit $PW_RC
 
 # verify-uninstalled (fs layer, DEC-029): assert the PLUGIN'S OWN dir is gone —

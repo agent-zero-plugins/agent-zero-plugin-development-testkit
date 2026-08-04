@@ -113,29 +113,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KEEP: ${{ env.ARTIFACT_KEEP }}
           ART_NAME: e2e-recording-sample
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event.pull_request.head.repo.fork || false }}" = "true" ]; then
-            echo "fork PR — token is read-only, skipping prune"; exit 0
-          fi
-          # Newest-first list of this artifact name, excluding already-expired ones.
-          mapfile -t ids < <(
-            gh api --paginate \
-              "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
-              -q ".artifacts[] | select(.name == \"${ART_NAME}\") | select(.expired == false) | \"\(.created_at) \(.id)\"" \
-            | sort -r | awk '{print $2}'
-          )
-          total=${#ids[@]}
-          echo "found $total live artifact(s) named ${ART_NAME}; keeping newest ${KEEP}"
-          if [ "$total" -le "$KEEP" ]; then
-            echo "nothing to prune"; exit 0
-          fi
-          deleted=0
-          for id in "${ids[@]:$KEEP}"; do
-            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
-              deleted=$((deleted+1))
-            else
-              echo "::warning::could not delete artifact ${id} (insufficient permission?)"
-            fi
-          done
-          echo "pruned ${deleted} artifact(s), kept ${KEEP}"
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork || false }}
+        # Single definition, shared with the reusable plugin-e2e.yml.
+        run: bash e2e/ci/prune-artifacts.sh

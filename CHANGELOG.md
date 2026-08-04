@@ -12,6 +12,19 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 
 ## Unreleased
 
+- **Fix: Dependabot PRs could never go green** (DEC-075). The reusable workflow declared its
+  App-token secrets `required: true`, but Dependabot runs receive no repo secrets — so every
+  dependency bump failed with `Input required and not supplied: app-id`, a failure unrelated to the
+  bump itself. Five PRs across the fleet were red for this reason. All secrets are now optional and
+  each consuming step is guarded on presence; the devkit is a public repo, so the submodule clones
+  anonymously by default. Consumers with a private devkit are unaffected (the token is still used
+  when available). This is also what allows an outside contributor's fork PR to run the suite.
+- **De-duplicated the shared e2e logic** (DEC-076). The artifact collector existed twice
+  (`run-bdd.sh`, `run-lifecycle.sh`) and had drifted — only one sanitised scenario names, and the
+  recent "empty artifact on green runs" fix landed in one copy while the other stayed broken. The
+  retention prune existed twice as inline YAML. Now: `e2e/harness/_artifacts.sh` sourced by both
+  harnesses, `e2e/ci/prune-artifacts.sh` invoked by both workflows.
+
 - **Fix: e2e runs uploaded a near-empty artifact.** Two independent defects, both of which made a
   *green* run undiagnosable. (1) `trace: retain-on-failure` meant a passing run produced no trace at
   all, so there was no ground truth to diff a later regression against — traces are now **always
