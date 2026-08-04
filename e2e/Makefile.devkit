@@ -30,7 +30,7 @@ PODMAN_E2E_FLAGS := --rm --device /dev/fuse --security-opt label=disable \
 # Riding along here means the standard one-line include gives them for free.
 -include $(DEVKIT_DIR)/e2e/make/bdd.mk
 
-.PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-skills link-devkit help-devkit
+.PHONY: build package up down e2e conformance update-devkit link-workflows link-gemini link-skills link-devkit help-devkit docs badges
 
 # Which devkit ref to bump to. Empty (default) = the latest release tag within your
 # MAJOR channel (.devkit.yml `devkit_major`, default 1) — a new MAJOR (e.g. v2, which
@@ -115,9 +115,24 @@ up: ## boot A0 nested for manual/agent exploration (inside the devcontainer)
 	  -v $(CURDIR):/workspace:ro -e A0_IMAGE=$(A0_IMAGE) \
 	  $(DEVKIT_IMAGE) -lc 'bash /workspace/$(DEVKIT_DIR)/e2e/harness/a0-up.sh && echo "A0 on :80 — exec in to explore" && sleep infinity'
 
+docs: ## regenerate docs/BEHAVIOUR.md + docs/screenshots/ from the last e2e run (DEC-077)
+	@# ARTIFACTS defaults to the local run's output; in CI the workflow points it
+	@# at the collected artifact dir. Never invents screenshots — a scenario with
+	@# no captured shot is reported as such in the generated doc.
+	python3 $(DEVKIT_DIR)/e2e/scripts/docs-from-e2e.py \
+	  --artifacts $(or $(ARTIFACTS),artifacts) \
+	  --features tests/e2e/features \
+	  --plugin $(PLUGIN_NAME) \
+	  --out docs
+
 conformance: ## assert this repo exposes the frozen target set + allowed assets
 	@for t in build package up e2e; do \
 	  $(MAKE) -n $$t >/dev/null 2>&1 || { echo "missing target: $$t"; exit 1; }; \
 	done
 	@test -f tests/e2e/hooks/verify-installed || echo "note: no tests/e2e/hooks/verify-installed (optional)"
 	@echo "conformance OK"
+
+badges: ## refresh the standard badge block in README.md (DEC-078)
+	python3 $(DEVKIT_DIR)/e2e/scripts/readme-badges.py \
+	  --repo $(shell git config --get remote.origin.url | sed -E 's#.*github.com[:/]([^/]+/[^/]+?)(\.git)?$$#\1#') \
+	  --plugin $(PLUGIN_NAME) --apply README.md
