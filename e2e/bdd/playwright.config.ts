@@ -20,12 +20,18 @@ const RED_PROOF = process.env.BDD_SKIP_INSTALL === "1";
 export default defineConfig({
   testDir, reporter: [["list"]], timeout: 120000, workers: 1, fullyParallel: false,
   // trace = the rich single-file artifact (network + DOM snapshots + console + video + timeline),
-  // viewable via `npx playwright show-trace` / trace.playwright.dev. Default: only failing scenarios
-  // (retain-on-failure); set BDD_TRACE=on (the workflow's capture-all-traces dispatch input) for every one.
+  // viewable via `npx playwright show-trace` / trace.playwright.dev.
+  //
+  // Default "on" (DEC-073): a GREEN run must leave evidence too, otherwise there
+  // is no baseline to diff a later regression against and a scenario can only be
+  // diagnosed after it has already broken. This default was "retain-on-failure",
+  // which is the same defect DEC-073 fixed in playwright-base.config.ts — the
+  // BDD suite kept its own copy of the setting and was missed. Override with
+  // BDD_TRACE / the workflow's trace-mode input.
   use: {
     baseURL: process.env.A0_BASE || "http://localhost:8099",
     video: RED_PROOF ? "off" : "on",
     screenshot: RED_PROOF ? "off" : "on",
-    trace: RED_PROOF ? "off" : ((process.env.BDD_TRACE as any) || "retain-on-failure"),
+    trace: RED_PROOF ? "off" : ((process.env.BDD_TRACE as any) || "on"),
   },
 });

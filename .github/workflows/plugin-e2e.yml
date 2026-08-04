@@ -30,10 +30,22 @@ on:
         type: string
         default: "tests/_testkit"
       capture-all-traces:
-        description: "Capture a Playwright trace for EVERY scenario (not just failures). Default: failing only."
+        # Kept for compatibility with existing callers (the caller template passes
+        # it from a workflow_dispatch input). It is now a no-op in the default
+        # direction: traces are ALWAYS captured (DEC-073). Setting it false no
+        # longer suppresses them — use trace-mode if you really want that.
+        description: "Deprecated — traces are always captured (DEC-073). Use trace-mode to override."
         required: false
         type: boolean
         default: false
+      trace-mode:
+        # Escape hatch for the rare case where trace capture itself is the
+        # problem (disk pressure on a huge suite). Accepts any Playwright trace
+        # mode: on | retain-on-failure | on-first-retry | off.
+        description: "Playwright trace mode. Default 'on' (DEC-073 — a green run must leave evidence too)."
+        required: false
+        type: string
+        default: "on"
     secrets:
       # DEC-075: all three are now OPTIONAL. They were `required: true` back when
       # the devkit was a PRIVATE repo and the submodule could only be cloned with
@@ -227,7 +239,12 @@ jobs:
           A0_IMAGE: ${{ steps.resolve.outputs.a0_image }}
           A0_POD_ENV: ${{ steps.resolve.outputs.pod_env }}
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-          BDD_TRACE: ${{ inputs.capture-all-traces && 'on' || 'retain-on-failure' }}
+          # DEC-073: traces are ALWAYS captured, so a green run leaves evidence to
+          # diff a later regression against. This line used to hardcode
+          # 'retain-on-failure' unless capture-all-traces was set, which silently
+          # overrode the config default and meant every consumer's green e2e
+          # shipped 0 traces — the exact defect DEC-073 was written to fix.
+          BDD_TRACE: ${{ inputs.trace-mode }}
         run: |
           set -euo pipefail
           mkdir -p dist "$GITHUB_WORKSPACE/artifacts"

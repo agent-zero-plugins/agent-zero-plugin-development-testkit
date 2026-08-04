@@ -10,6 +10,18 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## Unreleased
+
+- **Fix: traces still were not captured on green runs in consumers** (DEC-073, completing it).
+  v2.1.4 changed the trace default to `on` in `playwright-base.config.ts`, but two other places
+  still forced `retain-on-failure` and won: the reusable workflow hardcoded
+  `BDD_TRACE: ${{ inputs.capture-all-traces && 'on' || 'retain-on-failure' }}`, and the BDD suite
+  keeps its **own** `e2e/bdd/playwright.config.ts` whose default was also `retain-on-failure`.
+  Consumers therefore still shipped `copied 0 trace(s)` on a green run — the exact defect DEC-073
+  was written to fix, reported as fixed while two of the three settings still disagreed.
+  New `trace-mode` input (default `on`) replaces the boolean flip; `capture-all-traces` is kept for
+  caller compatibility but is now a no-op in the default direction.
+
 ## v2.1.4 — 2026-08-04
 
 - **Fix: Dependabot PRs could never go green** (DEC-075). The reusable workflow declared its
