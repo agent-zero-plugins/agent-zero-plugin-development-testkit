@@ -1,8 +1,20 @@
 # devkit-sync — caller template (SPEC DEC-044).
 #
 # Copied into a consumer plugin repo at .github/workflows/devkit-sync.yml by
-# `make link-workflows`. Keeps the repo's vendored devkit submodule
-# (tests/_testkit) current by bumping it to the devkit's latest main nightly.
+# `make link-workflows`. Bumps the repo's vendored devkit submodule
+# (tests/_testkit) to the devkit's latest release within its major channel.
+#
+# ON DEMAND ONLY (DEC-079). This used to run nightly at 04:00 UTC. A submodule
+# pin is a deliberate dependency upgrade, not something that should happen while
+# you sleep, and the schedule cost more than it delivered:
+#   * 189 runs across the fleet produced 29 merged bumps — 51 PRs opened, 18 of
+#     them closed without ever merging.
+#   * From 2026-07-10 it silently no-op'd for three weeks: every night it opened
+#     a PR whose checks sat in `action_required` awaiting approval, so nothing
+#     merged and nothing complained. A no-op looks exactly like "nothing to sync".
+#   * It clobbered in-flight work — see the branch-delete note in the reusable
+#     workflow.
+# Bump deliberately instead: `make update-devkit`, or run this workflow manually.
 #
 # Required REPO-level secrets (the shared sync GitHub App; already present on
 # repos that previously used skills-sync — same App):
@@ -15,8 +27,6 @@
 name: devkit-sync
 
 on:
-  schedule:
-    - cron: "0 4 * * *"   # nightly 04:00 UTC (offset from skills-sync's 03:00)
   workflow_dispatch:
 
 permissions:
