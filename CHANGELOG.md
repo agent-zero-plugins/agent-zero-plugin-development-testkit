@@ -10,7 +10,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
-## Unreleased
+## v2.1.5 — 2026-08-04
 
 - **Fix: traces still were not captured on green runs in consumers** (DEC-073, completing it).
   v2.1.4 changed the trace default to `on` in `playwright-base.config.ts`, but two other places
