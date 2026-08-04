@@ -1128,6 +1128,36 @@ while half the fleet was still broken. Collector → `e2e/harness/_artifacts.sh`
 harnesses; prune → `e2e/ci/prune-artifacts.sh`, invoked by both workflows. A reusable workflow can
 call the script from the consumer's vendored devkit path, so there is still exactly one definition.
 
+**DEC-077 — Plugin documentation is generated from the plugin's own e2e run.**
+Every green e2e already captures one screenshot per BDD scenario, and each scenario title is a
+plain-English statement of a behaviour the plugin guarantees. Those two artefacts together *are* the
+documentation, but they were being thrown away: the screenshots expired as CI artifacts and the
+feature files were read only by developers. The result was a fleet where one plugin had **zero**
+images in its README and the rest had hand-captured ones that quietly go stale.
+`make docs` joins them into `docs/BEHAVIOUR.md` + `docs/screenshots/`. Because the source is a
+*passing* run, a screenshot can never depict a state the plugin no longer produces, and a deleted or
+renamed scenario drops out of the docs automatically. Captions are the scenario titles verbatim — the
+generator invents no prose, and a scenario with no captured screenshot says so rather than being
+silently omitted.
+Implementation note worth keeping: Playwright **truncates** long scenario titles in its result
+directory names and inserts a hash, so matching a screenshot back to its scenario cannot be an exact
+comparison. It matches on the longest shared run of *trailing* tokens (the tail survives truncation)
+and requires at least two, since a single shared token is meaningless in a feature file where every
+scenario mentions the same nouns. The first implementation missed this and produced a document in
+which all twelve scenarios reported "no screenshot" — a plausible-looking empty result rather than an
+obvious failure, which is why `test_docs_from_e2e.py` pins this behaviour with real artifact names.
+
+**DEC-078 — Every plugin README carries the same, verifiable badge block.**
+The e2e suite is the strongest quality claim these plugins have — nested real A0, real browser, and a
+seam-off red-proof that fails the build if the scenarios could pass with the plugin *not* installed.
+None of it was visible to a reader: badge coverage across the fleet was 1, 0, 0, 1 (and 5 on the
+devkit itself). `make badges` splices a standard block under the H1, idempotently, between
+`BADGES:START`/`BADGES:END` markers.
+Constraint on what may appear there: every badge must be independently checkable by clicking it.
+Workflow status comes from the live Actions badge, the release from the tag list, the licence from
+the repo. The one non-GitHub badge ("BDD e2e") is a static label whose link lands on the actual
+feature directory. No invented coverage percentages.
+
 **DEC-079 — devkit-sync is on-demand, and never deletes its own branch.**
 Two corrections to the sync mechanism, one of policy and one of implementation.
 
@@ -1148,7 +1178,7 @@ e2e had passed and the result was discarded and re-queued for nothing. The same 
 alone is sufficient and non-destructive: an open PR follows its head ref and picks up the new commit.
 
 > **Numbering note:** DEC-070–072 were introduced as code comments only and were never written up
-> here. This section documents 073–076; backfilling 070–072 is tracked separately.
+> here. This section documents 073–079; backfilling 070–072 is tracked separately.
 
 ---
 
