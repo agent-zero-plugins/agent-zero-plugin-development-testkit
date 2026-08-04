@@ -303,7 +303,7 @@ jobs:
         # workflow_dispatch with capture-all-traces=true for every scenario. Open a trace with
         # `npx playwright show-trace <file>` or drag it into https://trace.playwright.dev .
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces-${{ steps.resolve.outputs.plugin_name }}
           path: artifacts/
