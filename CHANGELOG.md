@@ -10,7 +10,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
-## Unreleased
+## v2.1.4 — 2026-08-04
 
 - **Fix: Dependabot PRs could never go green** (DEC-075). The reusable workflow declared its
   App-token secrets `required: true`, but Dependabot runs receive no repo secrets — so every
