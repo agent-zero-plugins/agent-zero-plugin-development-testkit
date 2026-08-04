@@ -10,6 +10,20 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.1.6 — 2026-08-05
+
+- **New: `make docs`** (DEC-077). Builds `docs/BEHAVIOUR.md` + `docs/screenshots/` from the plugin's
+  own **passing** e2e run, so a screenshot can never depict a state the plugin no longer produces and
+  a renamed or deleted scenario drops out automatically. Captions are the BDD scenario titles
+  verbatim; a scenario with no captured screenshot says so rather than being silently omitted.
+- **New: `make badges`** (DEC-078). Splices a standard, idempotent badge block under the README H1.
+  Every badge is independently checkable by clicking it — no invented coverage percentages.
+- **devkit-sync is on-demand only, and no longer deletes its own branch** (DEC-079). The nightly
+  schedule is gone (189 runs had produced 29 merged bumps, and it silently no-op'd for three weeks
+  behind the `action_required` gate). More importantly the push step began with
+  `git push origin --delete "$BRANCH_NAME"`, and deleting a head ref **auto-closes its PR** — the
+  cause of 18 closed-unmerged sync PRs, four of them already green.
+
 ## v2.1.5 — 2026-08-04
 
 - **Fix: traces still were not captured on green runs in consumers** (DEC-073, completing it).
