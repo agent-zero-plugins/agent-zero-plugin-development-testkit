@@ -1128,6 +1128,25 @@ while half the fleet was still broken. Collector → `e2e/harness/_artifacts.sh`
 harnesses; prune → `e2e/ci/prune-artifacts.sh`, invoked by both workflows. A reusable workflow can
 call the script from the consumer's vendored devkit path, so there is still exactly one definition.
 
+**DEC-079 — devkit-sync is on-demand, and never deletes its own branch.**
+Two corrections to the sync mechanism, one of policy and one of implementation.
+
+*Policy.* The nightly `schedule:` is removed; the caller is `workflow_dispatch:` only. A submodule
+pin is a deliberate dependency upgrade, not something that should land while nobody is watching, and
+the schedule measurably cost more than it delivered: **189 runs produced 29 merged bumps** (51 PRs
+opened, 18 closed without merging). Worse, from 2026-07-10 it silently no-op'd for three weeks —
+every night it opened a PR whose checks sat in `action_required` awaiting approval, so nothing merged
+and nothing complained, because a no-op is indistinguishable from "nothing to sync". Deliberate bumps
+go through `make update-devkit` or a manual dispatch.
+
+*Implementation.* The push step began with `git push origin --delete "$BRANCH_NAME"`. Deleting a head
+ref **deletes the PR with it** — GitHub auto-closes any open PR whose head branch disappears. That is
+the actual cause of the 18 closed-unmerged PRs, including four that were **already fully green**: the
+e2e had passed and the result was discarded and re-queued for nothing. The same delete also made the
+`gh pr edit` reuse path below it dead code — it closed the very PR the next line went looking for, so
+`existing` was always empty and every run created a brand-new PR instead of updating one. A force-push
+alone is sufficient and non-destructive: an open PR follows its head ref and picks up the new commit.
+
 > **Numbering note:** DEC-070–072 were introduced as code comments only and were never written up
 > here. This section documents 073–076; backfilling 070–072 is tracked separately.
 
