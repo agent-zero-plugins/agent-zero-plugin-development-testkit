@@ -65,12 +65,30 @@ jobs:
       # to a warning (the step is continue-on-error and never fails the run).
       actions: write
     steps:
+      - name: Detect whether App credentials are available
+        id: creds
+        # The `secrets` context is NOT one of the contexts allowed in an `if:`
+        # expression — using it there makes the whole workflow file invalid and
+        # the run dies as a startup_failure with zero jobs. So probe the secrets
+        # in a `run:` step (where they ARE available, via env) and branch on the
+        # step output instead. Nothing secret is printed, only a yes/no.
+        env:
+          CLIENT_ID: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "${CLIENT_ID:-}" ] && [ -n "${PRIVATE_KEY:-}" ]; then
+            echo "have_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_app=false" >> "$GITHUB_OUTPUT"
+            echo "no App credentials (Dependabot run, fork PR, or public devkit) — will clone anonymously"
+          fi
+
       - name: Mint App token (read-only — devkit submodule clone)
         id: app-token
         # Only when the App credentials are actually present. Dependabot runs and
         # fork PRs get no secrets, and the devkit is public, so they skip this and
         # clone the submodule anonymously below (DEC-075).
-        if: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID != '' && secrets.SKILLS_SYNC_APP_PRIVATE_KEY != '' }}
+        if: steps.creds.outputs.have_app == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           client-id: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
