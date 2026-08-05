@@ -1077,6 +1077,41 @@ the consumer's major (`.devkit.yml devkit_major`, default **1**), so the nightly
 repo to v2. A plugin adopts the mandate deliberately when it's ready — `make update-devkit DEVKIT_REF=v2.0.0`
 (and sets `devkit_major: 2`). Non-breaking releases (MINOR/PATCH) still auto-flow within the channel.
 
+**DEC-070 — The seam-off red-proof runs under its own, much shorter test timeout.**
+Gate 3 (DEC-066) re-runs every behaviour scenario with the plugin *not* installed and asserts that
+exactly zero pass. Its entire cost is therefore in the **fail** path: with no plugin the seam 404s, so
+each scenario runs until something times out. The binding clock is Playwright's **test-level** timeout
+(120s), not the action or expect timeouts — a step's explicit per-call `{ timeout: N }`, which plugin
+steps routinely pass, cannot be overridden from config but *is* capped by the test timeout. Measured:
+12 scenarios × ~113s ≈ **22m40s**, almost exactly 12 × the cap. So the red-proof pass alone runs with
+`RED_PROOF_TIMEOUT_MS` (default 30s). Semantics are untouched — every scenario still runs and the
+assertion is still "exactly 0 passes".
+This is a speed-up on a *gate*, which is precisely the kind of change that can quietly weaken one, so
+two guards make that impossible to do unnoticed: **coverage parity** (the red-proof must exercise the
+same scenario count as the real run, catching any future filter/grep/project split) and **cap
+adequacy** (the slowest genuinely-passing scenario must complete well inside the cap, so the cap can
+never clip a would-be fake-green into a false failure). Both hard-fail with the value to raise.
+
+**DEC-071 — The devkit harness image is published, and published publicly.**
+`e2e/Makefile.devkit` defaulted `DEVKIT_IMAGE` to `ghcr.io/agent-zero-plugins/plugin-devkit:latest`,
+but nothing ever pushed it. The package did not exist, so a consumer's `make e2e` died with
+`manifest unknown`, and CI only worked because every workflow rebuilt the image inline — **~85s on
+every run, forever**. `publish-devkit-image.yml` builds and pushes it on changes to the Containerfile.
+**Public on purpose.** The image is `quay.io/podman/stable` + Node + Playwright + Fedora browser libs:
+no secrets, no first-party source. Publishing it publicly means an outside contributor can run the
+documented local loop with **no GHCR auth at all**, which is the single most important consumability
+property this repo has.
+
+**DEC-072 — Post-login landmark waits are explicitly bounded, not left on the default.**
+`LoginPage` asserts on a post-login landmark (the top-nav "Plugins" button) rather than the URL alone,
+so a *silent auth failure* surfaces as a timeout on that line instead of passing through to a confusing
+downstream failure. That assertion needs an explicit 30s: on a cold nested A0 the WebUI hydrates ~5s
+**after** the post-login redirect, straddling Playwright's 5s default and flaking ~50%. Measured from
+run 30721063715's trace — page reached `/` at t=2.4s, top-nav rendered at t=7.755s, missing the
+default deadline (~7.4s) by ~350ms. The wait exists to surface a silent auth failure, **not** to
+measure hydration speed, so it is bounded generously rather than tightly — consistent with
+`PluginsPage`'s 8s/20s/10s landmark waits.
+
 **DEC-073 — e2e traces are captured on every run, not just failures.**
 `trace: "retain-on-failure"` meant a **passing** run produced no trace at all, so there was no ground
 truth to diff a later regression against and a scenario could only be diagnosed *after* it had already
@@ -1177,8 +1212,11 @@ e2e had passed and the result was discarded and re-queued for nothing. The same 
 `existing` was always empty and every run created a brand-new PR instead of updating one. A force-push
 alone is sufficient and non-destructive: an open PR follows its head ref and picks up the new commit.
 
-> **Numbering note:** DEC-070–072 were introduced as code comments only and were never written up
-> here. This section documents 073–079; backfilling 070–072 is tracked separately.
+> **Numbering note:** DEC-070–072 were originally introduced as code comments only. They are now
+> written up above, so this section documents an unbroken 070–079. The lesson is worth keeping: a
+> decision that exists only as a code comment is invisible to anyone reading the SPEC, and all three
+> of these were load-bearing (a gate's timeout budget, the image the whole fleet pulls, and a wait
+> that was flaking half the runs).
 
 ---
 
