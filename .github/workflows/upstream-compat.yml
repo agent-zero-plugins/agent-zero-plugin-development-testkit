@@ -170,6 +170,17 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The devkit itself must land at the workspace ROOT: the harness build below
+      # references devcontainer/Containerfile relative to it. The first version of
+      # this job checked out only the plugin and every leg died with
+      # `context must be a directory: .../devcontainer` — the devkit was simply
+      # never fetched.
+      #
+      # Order matters. A checkout without `path` cleans the workspace, so it has to
+      # run BEFORE the plugin is placed in plugin/, or it would delete it.
+      - name: Checkout the devkit (harness + scripts)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
       - name: Checkout the plugin under test
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
