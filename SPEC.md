@@ -1212,8 +1212,27 @@ e2e had passed and the result was discarded and re-queued for nothing. The same 
 `existing` was always empty and every run created a brand-new PR instead of updating one. A force-push
 alone is sufficient and non-destructive: an open PR follows its head ref and picks up the new commit.
 
+**DEC-080 — Caller-template drift is detected, because nothing else can see it.**
+`make link-workflows` *copies* the caller templates into a consumer's `.github/workflows/`, and
+`devkit-sync` deliberately never writes that directory (its `GITHUB_TOKEN` may not push workflow
+files). So the vendored devkit advances while the copied caller stands still, and **nothing at
+runtime notices** — both known instances were silent by construction: share-chat could not reach the
+`capture_all_traces` input for weeks because its caller predated it, and `actions: write` (DEC-074)
+had to be hand-propagated to four repos in four PRs, with the prune degrading to a *warning* in the
+meantime rather than failing.
+`e2e/ci/check-caller-drift.sh` compares the **executable contract** — triggers, dispatch inputs,
+permissions, job ids, `uses` refs, `with` inputs, and the secrets shape — and ignores comments,
+whitespace, quoting, key order and prose descriptions. That line is deliberate: a byte-diff would
+have fired on all four consumers the moment the devkit rewrote a header comment, and a checker that
+cries wolf gets `|| true`'d. Templates resolve to the consumer's own pinned `tests/_testkit` when
+available, so each repo is judged against the devkit ref *it* pinned rather than whatever `main`
+happens to be.
+The self-test is not decoration. It replays both real incidents as positive controls and pins the
+cosmetic tolerances as negative controls, so the tempting "fix" for a noisy checker — loosening it
+until it stops complaining — fails the suite instead of passing quietly.
+
 > **Numbering note:** DEC-070–072 were originally introduced as code comments only. They are now
-> written up above, so this section documents an unbroken 070–079. The lesson is worth keeping: a
+> written up above, so this section documents an unbroken 070–080. The lesson is worth keeping: a
 > decision that exists only as a code comment is invisible to anyone reading the SPEC, and all three
 > of these were load-bearing (a gate's timeout budget, the image the whole fleet pulls, and a wait
 > that was flaking half the runs).
