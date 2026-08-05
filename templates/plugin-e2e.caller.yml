@@ -8,9 +8,19 @@
 # (.devkit.yml `plugin_dir` → else canonical usr/plugins/<name>), so this
 # template is identical across all repos.
 #
-# Needs the shared sync-App secrets to clone the private devkit submodule, and
-# (DEC-055) GHCR_PULL_TOKEN to pull the private fork image. `secrets: inherit`
-# forwards all repo secrets, so new shared secrets need no caller change.
+# Needs (DEC-055) GHCR_PULL_TOKEN to pull the private fork image; the sync-App
+# pair is legacy/optional since the devkit went public (DEC-075).
+#
+# SECRETS ARE PASSED EXPLICITLY, not via `secrets: inherit` (DEC-081).
+# `inherit` forwards EVERY repo- and org-level secret to the reusable workflow —
+# including secrets added later and secrets the workflow never declares. The
+# reusable workflow declares exactly the three below, all `required: false`, so
+# this list is complete. Adding a shared secret later means editing this template
+# and re-running `make link-workflows`, which is the same cadence as every other
+# devkit asset (devkit-sync.caller.yml already pays exactly this cost).
+#
+# The `uses:` ref is pinned to a RELEASE TAG, not `@main`. With `@main`, every
+# merge to the devkit went live in 24 consumers' CI immediately and unreviewed.
 name: plugin-e2e
 
 on:
@@ -30,7 +40,10 @@ permissions:
 
 jobs:
   e2e:
-    uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@main
-    secrets: inherit
+    uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/plugin-e2e.yml@v2.1.6
+    secrets:
+      GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+      SKILLS_SYNC_APP_CLIENT_ID: ${{ secrets.SKILLS_SYNC_APP_CLIENT_ID }}
+      SKILLS_SYNC_APP_PRIVATE_KEY: ${{ secrets.SKILLS_SYNC_APP_PRIVATE_KEY }}
     with:
       capture-all-traces: ${{ inputs.capture_all_traces || false }}
