@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   sync:
-    uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/devkit-sync.yml@main
+    uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/devkit-sync.yml@v2.1.6
     with:
       devkit-submodule-path: "tests/_testkit"
     secrets:

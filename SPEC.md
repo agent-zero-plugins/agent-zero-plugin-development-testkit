@@ -1231,8 +1231,32 @@ The self-test is not decoration. It replays both real incidents as positive cont
 cosmetic tolerances as negative controls, so the tempting "fix" for a noisy checker — loosening it
 until it stops complaining — fails the suite instead of passing quietly.
 
+**DEC-081 — Callers pin a release tag and pass secrets explicitly, never `secrets: inherit`.**
+The caller templates used `@main` with `secrets: inherit`, and the reach of that was six times what
+it first appeared: **24 repos**, not four — including `agent-zero-new-plugin-template`, so every
+future plugin inherited it too.
+*Why the tag matters.* `@main` is not merely mutable; it means **every merge to the devkit goes live
+in 24 repos' CI immediately and unreviewed**. That is not hypothetical — three fleet-wide regressions
+in this SPEC came from exactly that path (DEC-079 closed 18 sync PRs, four already green; DEC-073 left
+every consumer's green e2e shipping zero traces; DEC-075 made every Dependabot PR structurally red).
+A tag is movable by the same principal who could push `main`, so it is not a security boundary against
+an insider — what it changes is the **default**: `main` advances automatically on every merge, a tag
+only on a deliberate act. Forgetting to bump fails *safe* (stale but working), never open.
+*Why explicit secrets.* `inherit` forwards every repo- and org-level secret, including ones added
+later and ones the workflow never declares — so a change to the devkit would execute with the full
+secret set of all 24 consumers. The reusable workflow declares exactly three, all `required: false`,
+so an explicit list is a strict superset of what it consumes and breaks nothing. It also closes an
+unverifiable gap: org-level secrets cannot be enumerated without `admin:org`, and `inherit` would
+forward those too. `devkit-sync.caller.yml` already passed secrets explicitly; this brings the other
+caller into line rather than inventing a new convention.
+*Rated honestly.* Confidentiality risk is **low** — the org has one member, zero forks, no outside
+collaborators, and the credential that could leak is a read-only package token plus an App key whose
+job disappeared when the devkit went public. The real cost is **integrity and blast radius**: one
+unreviewed merge changes CI in 24 repos with no canary and no rollback boundary. Fixed as change
+management, not as a breach.
+
 > **Numbering note:** DEC-070–072 were originally introduced as code comments only. They are now
-> written up above, so this section documents an unbroken 070–080. The lesson is worth keeping: a
+> written up above, so this section documents an unbroken 070–081. The lesson is worth keeping: a
 > decision that exists only as a code comment is invisible to anyone reading the SPEC, and all three
 > of these were load-bearing (a gate's timeout budget, the image the whole fleet pulls, and a wait
 > that was flaking half the runs).
