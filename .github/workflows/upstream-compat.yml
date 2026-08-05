@@ -287,10 +287,10 @@ jobs:
             -e A0_POD_ENV="$A0_POD_ENV" \
             -e ARTIFACT_DIR=/artifacts \
             -e WORKSPACE=/plugin \
-            -e DEVKIT_PATH=. \
+            -e DEVKIT_PATH=tests/_testkit \
             -e BDD_TRACE=retain-on-failure \
             plugin-devkit:ci \
-            -lc 'bash /workspace/e2e/harness/'"$HARNESS"
+            -lc 'bash /plugin/tests/_testkit/e2e/harness/'"$HARNESS"
 
       - name: Upload failure evidence
         # retain-on-failure, not always: a nightly that uploads a full trace set
