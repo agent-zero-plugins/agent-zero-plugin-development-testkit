@@ -1,0 +1,178 @@
+# Reusable ci-budget workflow — the per-plugin CI budget / e2e record.
+#
+# WHAT IT PRODUCES
+#   1. A job summary on every invocation (ephemeral, free, always readable from
+#      the run page).
+#   2. A ci-budget.json artifact (machine-readable, for a future fleet roll-up).
+#   3. A single long-lived issue per repo whose BODY is the record, upserted in
+#      place — durable and permalinked with ZERO commits and ZERO PRs.
+#
+#   Deliberately NOT a committed docs/CI-BUDGET.md: that would produce a commit
+#   per run whose only delta is a timestamp, which is the churn pattern that got
+#   the nightly devkit-sync deleted.
+#
+# HOW TO INVOKE
+#   * on a schedule (weekly) via the caller template — the cheap default; the
+#     record is a few API calls, ~20s, no containers, no runner minutes worth
+#     counting;
+#   * or as a final job of plugin-e2e, if you want the record refreshed the
+#     moment an e2e finishes (pass workflow-name and it will pick the run up).
+name: ci-budget
+
+on:
+  workflow_call:
+    inputs:
+      workflow-name:
+        description: "NAME (not filename) of the workflow to budget."
+        required: false
+        type: string
+        default: "plugin-e2e"
+      window-days:
+        description: "Rolling window for minutes + pass/fail counts."
+        required: false
+        type: number
+        default: 30
+      devkit-submodule-path:
+        description: "Path to the vendored devkit submodule."
+        required: false
+        type: string
+        default: "tests/_testkit"
+      publish-issue:
+        description: "Upsert the durable record issue (else summary + artifact only)."
+        required: false
+        type: boolean
+        default: true
+      fail-on-stale:
+        description: "Fail the job when no e2e run exists in the window."
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      # OPTIONAL, and the workflow is fully useful without it. It unlocks the
+      # authoritative billed-minutes tier from the org billing usage endpoint,
+      # which the repo-scoped GITHUB_TOKEN structurally cannot read. Without it
+      # the record says so in plain words instead of guessing a number.
+      BILLING_READ_TOKEN:
+        description: "Org-scoped PAT (read:org) for /organizations/{org}/settings/billing/usage."
+        required: false
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read     # runs + jobs timing
+      issues: write     # upsert the durable record issue
+    steps:
+      - name: Checkout consumer (no submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: false
+
+      - name: Init devkit submodule
+        env:
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        # The devkit is public, so this needs no credentials (DEC-075).
+        run: git submodule update --init "$DEVKIT_PATH"
+
+      - name: Resolve plugin name
+        id: resolve
+        run: |
+          set -euo pipefail
+          y(){ sed -nE "s/^$1:[[:space:]]*\"?([^\"]+)\"?.*/\1/p" "$2" 2>/dev/null | head -1; }
+          plugin_dir=""
+          [ -f .devkit.yml ] && plugin_dir=$(y plugin_dir .devkit.yml)
+          if [ -z "$plugin_dir" ]; then
+            plugin_dir=$(dirname "$(find usr/plugins -maxdepth 2 -name plugin.yaml 2>/dev/null | head -1)")
+          fi
+          name=$(y name "$plugin_dir/plugin.yaml")
+          [ -n "$name" ] || name="${GITHUB_REPOSITORY##*/}"
+          echo "plugin_name=$name" >> "$GITHUB_OUTPUT"
+          echo "resolved plugin: $name"
+
+      - name: Detect whether a billing token is available
+        id: creds
+        # The `secrets` context is NOT allowed inside an `if:` expression — using
+        # it there invalidates the entire workflow file and the run dies as a
+        # startup_failure with zero jobs. Probe it in a run step (secrets ARE
+        # available there via env) and branch on the step output. Only a yes/no
+        # is printed; the token itself never is.
+        env:
+          BILLING_TOKEN: ${{ secrets.BILLING_READ_TOKEN }}
+        run: |
+          if [ -n "${BILLING_TOKEN:-}" ]; then
+            echo "have_billing=true" >> "$GITHUB_OUTPUT"
+            echo "org billing token present — billed-minutes tier enabled"
+          else
+            echo "have_billing=false" >> "$GITHUB_OUTPUT"
+            echo "no org billing token — record will report billed minutes as unavailable"
+          fi
+
+      - name: Build the record
+        id: build
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BILLING_TOKEN: ${{ secrets.BILLING_READ_TOKEN }}
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+          PLUGIN: ${{ steps.resolve.outputs.plugin_name }}
+          WF: ${{ inputs.workflow-name }}
+          DAYS: ${{ inputs.window-days }}
+        run: |
+          set -uo pipefail
+          python3 "$DEVKIT_PATH/e2e/scripts/ci-budget.py" \
+            --repo "$GITHUB_REPOSITORY" \
+            --plugin "$PLUGIN" \
+            --workflow "$WF" \
+            --days "$DAYS" \
+            --json-out ci-budget.json \
+            --md-out ci-budget.md
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -f ci-budget.md ]; then
+            cat ci-budget.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## CI budget — generation FAILED" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload machine-readable record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-budget-${{ steps.resolve.outputs.plugin_name }}
+          path: ci-budget.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upsert durable record issue
+        if: always() && inputs.publish-issue
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TITLE: "CI budget — ${{ steps.resolve.outputs.plugin_name }}"
+          BODY_FILE: ci-budget.md
+          LABEL: ci-budget
+          MODE: always
+          DEVKIT_PATH: ${{ inputs.devkit-submodule-path }}
+        run: |
+          {
+            echo ""
+            echo "---"
+            echo "<sub>Maintained automatically by the devkit \`ci-budget\` workflow —"
+            echo "the body is replaced in place on each run, so there is no commit and"
+            echo "no PR. Last refreshed by [run ${GITHUB_RUN_ID}](https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}).</sub>"
+          } >> ci-budget.md
+          bash "$DEVKIT_PATH/e2e/ci/upsert-record-issue.sh"
+
+      - name: Fail on stale e2e
+        # Off by default. Turn it on once the fleet's cadence is steady and you
+        # want "nobody has run e2e in 30 days" to be loud rather than a footnote.
+        if: always() && inputs.fail-on-stale && steps.build.outputs.rc != '0'
+        run: |
+          echo "::error::ci-budget reported a stale or missing e2e record"
+          exit 1
