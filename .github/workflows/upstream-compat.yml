@@ -1,0 +1,415 @@
+# upstream-compat — continuous backwards-support check against LATEST UPSTREAM A0.
+#
+# THE GAP THIS CLOSES
+#   Every consumer's .devkit.yml pins the private fork image, and none of the
+#   four target plugins overrides `a0_image`. So the fleet's e2e today proves
+#   "works on the fork" and says NOTHING about "still works on upstream". The
+#   machinery already exists — plugin-e2e.yml takes an a0_image input and the
+#   devkit's own sample-plugin-e2e.yml already boots
+#   docker.io/agent0ai/agent-zero:latest. What was missing is the scheduled
+#   fan-out and somewhere the result is seen. That is all this file adds.
+#
+# HOW THIS DIFFERS FROM THE NIGHTLY devkit-sync THAT WAS DELETED
+#   devkit-sync burned 189 runs to produce 29 merged bumps and then silently
+#   no-op'd for three weeks. Three concrete differences:
+#
+#   1. CHANGE-GATED, NOT CALENDAR-GATED. A ~20s probe job resolves the upstream
+#      manifest digest and only fans out the expensive legs when the digest has
+#      actually moved since the last full run (tracked via actions/cache — no
+#      commits, no state file). Upstream :latest does not change nightly, so
+#      this is the difference between ~1,700 runner-min/month and roughly
+#      (upstream releases × 56 min). Detection latency is unchanged: the probe
+#      still runs every night.
+#   2. IT CANNOT SILENTLY NO-OP. A weekly floor (max-skip-days) forces a full
+#      run even when the digest is unchanged, so "nothing happened for three
+#      weeks" is impossible. The probe also HARD-FAILS if it cannot resolve the
+#      digest, rather than skipping quietly, and the report job asserts that the
+#      matrix actually produced results — an empty matrix is a failure, not a
+#      pass. Every outcome is stamped into the record issue with a timestamp, so
+#      staleness is visible on the artifact itself.
+#   3. ZERO PR CHURN. It never opens a pull request and never commits. Its only
+#      write is one long-lived issue, opened when a plugin breaks against
+#      upstream and closed automatically when the fleet is green again. An open
+#      issue means "act"; there is no steady-state noise to learn to ignore.
+name: upstream-compat
+
+on:
+  schedule:
+    # 03:20 UTC — off the top of the hour, where GitHub's scheduler queues are
+    # worst. The probe runs nightly; the expensive legs are digest-gated.
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run the full matrix even if the upstream digest is unchanged"
+        type: boolean
+        default: false
+      plugins:
+        description: "Override the plugin list (space-separated repo names)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  UPSTREAM_IMAGE: docker.io/agent0ai/agent-zero:latest
+  # The fleet under continuous backwards-support check. Space-separated repo
+  # names within agent-zero-plugins. Adding a plugin is a one-word edit.
+  PLUGINS: >-
+    agent-zero-plugin-chat-comments
+    agent-zero-plugin-diff-visualizer
+    agent-zero-plugin-mermaid-diagrams
+    agent-zero-plugin-share-chat
+  # Force a full run at least this often even if upstream never moves, so the
+  # workflow can never quietly become a no-op.
+  MAX_SKIP_DAYS: 7
+
+jobs:
+  # ---------------------------------------------------------------- 1. probe
+  probe:
+    name: probe upstream digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+      changed: ${{ steps.decide.outputs.changed }}
+      reason: ${{ steps.decide.outputs.reason }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Resolve upstream manifest digest
+        id: digest
+        # Hard-fails if it cannot resolve. A probe that shrugs and exits 0 is how
+        # devkit-sync managed to no-op for three weeks unnoticed.
+        env:
+          IMAGE: ${{ env.UPSTREAM_IMAGE }}
+        run: bash e2e/ci/upstream-digest.sh "$IMAGE"
+
+      - name: Look up last-tested digest
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          # Cache HIT on this exact digest ⇒ we already ran the full matrix
+          # against this image. No commits, no state file, no PR.
+          path: .upstream-compat-state
+          key: upstream-compat-${{ steps.digest.outputs.digest_short }}
+          restore-keys: upstream-compat-
+
+      - name: Decide whether to fan out
+        id: decide
+        env:
+          HIT: ${{ steps.cache.outputs.cache-hit }}
+          FORCE: ${{ inputs.force }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          last_ts=0
+          [ -f .upstream-compat-state ] && last_ts=$(sed -n 's/^ts=//p' .upstream-compat-state | head -1)
+          : "${last_ts:=0}"
+          now=$(date +%s)
+          age_days=$(( (now - last_ts) / 86400 ))
+
+          if [ "${FORCE}" = "true" ]; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+            echo "reason=forced via workflow_dispatch" >> "$GITHUB_OUTPUT"
+          elif [ "${HIT}" != "true" ]; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+            echo "reason=upstream digest moved to ${DIGEST}" >> "$GITHUB_OUTPUT"
+          elif [ "$last_ts" -eq 0 ] || [ "$age_days" -ge "${MAX_SKIP_DAYS}" ]; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+            echo "reason=weekly floor reached (${age_days}d since last full run) — digest unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "reason=upstream digest unchanged (${DIGEST}), last full run ${age_days}d ago — skipping the expensive matrix" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build plugin matrix
+        id: matrix
+        env:
+          OVERRIDE: ${{ inputs.plugins }}
+        run: |
+          set -euo pipefail
+          list="${OVERRIDE:-$PLUGINS}"
+          json=$(printf '%s\n' $list | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          n=$(printf '%s' "$json" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))')
+          # An empty matrix would make every downstream job "succeed" while
+          # testing nothing. Refuse.
+          [ "$n" -gt 0 ] || { echo "::error::plugin matrix is empty"; exit 1; }
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+          echo "matrix ($n): $json"
+
+      - name: Probe summary
+        run: |
+          {
+            echo "## upstream-compat probe"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| image | \`${UPSTREAM_IMAGE}\` |"
+            echo "| digest | \`${{ steps.digest.outputs.digest }}\` |"
+            echo "| fan out? | **${{ steps.decide.outputs.changed }}** |"
+            echo "| reason | ${{ steps.decide.outputs.reason }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------ 2. the legs
+  compat:
+    name: ${{ matrix.plugin }}
+    needs: probe
+    if: needs.probe.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false     # one broken plugin must not hide the state of the others
+      max-parallel: 2      # nested-A0 legs are disk-hungry; stagger them
+      matrix:
+        plugin: ${{ fromJSON(needs.probe.outputs.matrix) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the plugin under test
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # Public repos, so the default token suffices for a cross-repo read.
+          repository: ${{ github.repository_owner }}/${{ matrix.plugin }}
+          submodules: recursive
+          path: plugin
+
+      - name: Free disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                      /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          echo "after reclaim:"; df -h / | tail -1
+
+      - name: Resolve plugin
+        id: resolve
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          y(){ sed -nE "s/^$1:[[:space:]]*\"?([^\"]+)\"?.*/\1/p" "$2" 2>/dev/null | head -1; }
+          plugin_dir="" display_name=""
+          if [ -f .devkit.yml ]; then
+            plugin_dir=$(y plugin_dir .devkit.yml)
+            display_name=$(y display_name .devkit.yml)
+          fi
+          if [ -z "$plugin_dir" ]; then
+            plugin_dir=$(dirname "$(find usr/plugins -maxdepth 2 -name plugin.yaml 2>/dev/null | head -1)")
+          fi
+          [ -d "$plugin_dir" ] && [ -f "$plugin_dir/plugin.yaml" ] || {
+            echo "::error::could not resolve plugin_dir in ${{ matrix.plugin }}"; exit 1; }
+          plugin_name=$(y name "$plugin_dir/plugin.yaml")
+          [ -n "$display_name" ] || display_name=$(y title "$plugin_dir/plugin.yaml")
+          [ -n "$display_name" ] || display_name="$plugin_name"
+          pod_env=""
+          if [ -f .devkit.yml ]; then
+            pod_env=$(y e2e_pod_env .devkit.yml)
+            if [ -z "$pod_env" ]; then
+              pod_env=$(awk '
+                /^e2e_pod_env:[[:space:]]*$/ {inblk=1; next}
+                inblk && /^[[:space:]]+[A-Za-z_][A-Za-z0-9_]*:/ {
+                  l=$0; sub(/^[[:space:]]+/,"",l)
+                  k=l; sub(/:.*/,"",k)
+                  v=l; sub(/^[^:]*:[[:space:]]*/,"",v); gsub(/^["'\'']|["'\'']$/,"",v)
+                  printf "%s=%s ", k, v; next }
+                inblk && /^[^[:space:]]/ {inblk=0}
+              ' .devkit.yml)
+            fi
+          fi
+          echo "plugin_dir=$plugin_dir"     >> "$GITHUB_OUTPUT"
+          echo "plugin_name=$plugin_name"   >> "$GITHUB_OUTPUT"
+          echo "display_name=$display_name" >> "$GITHUB_OUTPUT"
+          echo "pod_env=$pod_env"           >> "$GITHUB_OUTPUT"
+          echo "Resolved: dir=$plugin_dir name=$plugin_name a0=UPSTREAM"
+
+      - name: Build devkit devcontainer (rootless)
+        run: podman build -t plugin-devkit:ci -f devcontainer/Containerfile devcontainer
+
+      - name: Package + run lifecycle against UPSTREAM A0
+        env:
+          PLUGIN_DIR: ${{ steps.resolve.outputs.plugin_dir }}
+          PLUGIN_NAME: ${{ steps.resolve.outputs.plugin_name }}
+          DISPLAY_NAME: ${{ steps.resolve.outputs.display_name }}
+          A0_POD_ENV: ${{ steps.resolve.outputs.pod_env }}
+          # The whole point: pin the digest the probe resolved, not the moving
+          # tag, so every leg of one night tests the SAME image and a red result
+          # names an exact upstream artifact.
+          A0_IMAGE: docker.io/agent0ai/agent-zero@${{ needs.probe.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist "$GITHUB_WORKSPACE/artifacts"
+          chmod 777 "$GITHUB_WORKSPACE/artifacts"
+          ( cd "plugin/$PLUGIN_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip" . \
+              -x '.git/*' 'tests/*' '.github/*' '.skills/*' 'dist/*' '*/node_modules/*' \
+                 '.devkit.yml' '.gitmodules' '.gitignore' )
+          BEHAVIOUR_ARG=""
+          [ -f "plugin/tests/e2e/behaviour.mjs" ] && BEHAVIOUR_ARG="/plugin/tests/e2e/behaviour.mjs"
+          SPECS_JSON="[]"
+          if ls plugin/tests/e2e/specs/*.mjs >/dev/null 2>&1; then
+            SPECS_JSON=$(for f in plugin/tests/e2e/specs/*.mjs; do
+              n=$(basename "$f" .mjs); printf '{"name":"%s","path":"/plugin/%s"}\n' "$n" "${f#plugin/}"; done \
+              | paste -sd, - | sed 's/^/[/; s/$/]/')
+          fi
+          HARNESS=run-lifecycle.sh
+          if ls plugin/tests/e2e/features/*.feature >/dev/null 2>&1; then HARNESS=run-bdd.sh; fi
+          echo "harness: $HARNESS  image: $A0_IMAGE"
+          podman run --rm \
+            --device /dev/fuse \
+            --security-opt label=disable \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -v "$GITHUB_WORKSPACE":/workspace:ro \
+            -v "$GITHUB_WORKSPACE/plugin":/plugin:ro \
+            -v "$GITHUB_WORKSPACE/dist/$PLUGIN_NAME.zip":/tmp/plugin.zip:ro \
+            -v "$GITHUB_WORKSPACE/artifacts":/artifacts:rw \
+            -e A0_IMAGE="$A0_IMAGE" \
+            -e PLUGIN_ZIP=/tmp/plugin.zip \
+            -e PLUGIN_DISPLAY_NAME="$DISPLAY_NAME" \
+            -e PLUGIN_NAME="$PLUGIN_NAME" \
+            -e HOOK_DIR=/plugin/tests/e2e/hooks \
+            -e BEHAVIOUR_FILE="$BEHAVIOUR_ARG" \
+            -e BEHAVIOUR_SPECS="$SPECS_JSON" \
+            -e A0_POD_ENV="$A0_POD_ENV" \
+            -e ARTIFACT_DIR=/artifacts \
+            -e WORKSPACE=/plugin \
+            -e DEVKIT_PATH=. \
+            -e BDD_TRACE=retain-on-failure \
+            plugin-devkit:ci \
+            -lc 'bash /workspace/e2e/harness/'"$HARNESS"
+
+      - name: Upload failure evidence
+        # retain-on-failure, not always: a nightly that uploads a full trace set
+        # for four green plugins every week is storage the operator pays for and
+        # nobody opens. A red night gets the full trace.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-compat-${{ matrix.plugin }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------- 3. report
+  report:
+    name: report
+    needs: [probe, compat]
+    if: always() && needs.probe.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Assemble the record
+        id: rec
+        env:
+          CHANGED: ${{ needs.probe.outputs.changed }}
+          REASON: ${{ needs.probe.outputs.reason }}
+          DIGEST: ${{ needs.probe.outputs.digest }}
+          MATRIX: ${{ needs.probe.outputs.matrix }}
+          COMPAT: ${{ needs.compat.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          now=$(date -u +'%Y-%m-%d %H:%M UTC')
+          {
+            echo "# Upstream compatibility — \`${UPSTREAM_IMAGE}\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| last checked | **${now}** |"
+            echo "| upstream digest | \`${DIGEST}\` |"
+            echo "| full matrix ran? | **${CHANGED}** — ${REASON} |"
+            echo "| plugins under check | $(printf '%s' "$MATRIX" | python3 -c 'import sys,json; print(", ".join("`%s`" % p for p in json.load(sys.stdin)))') |"
+            echo "| result | ${COMPAT:-skipped} |"
+            echo "| evidence | [${GITHUB_RUN_ID}](${RUN_URL}) |"
+          } > record.md
+
+          # STATUS drives whether the record issue is opened or closed.
+          #   compat skipped (digest unchanged) → ok, nothing to report
+          #   compat success                    → ok
+          #   anything else                     → fail
+          case "${COMPAT}" in
+            ""|skipped|success) status=ok ;;
+            *)                  status=fail ;;
+          esac
+          if [ "$status" = "fail" ]; then
+            {
+              echo ""
+              echo "## ❌ At least one plugin fails against the latest upstream A0"
+              echo ""
+              echo "Open the [run](${RUN_URL}) and expand the red matrix leg. Per-leg"
+              echo "Playwright traces are attached as \`upstream-compat-<plugin>\` artifacts."
+              echo ""
+              echo "This is a **backwards-support regression**: the plugin still passes on"
+              echo "the fork image its own \`plugin-e2e\` pins, so nothing in the plugin"
+              echo "repo went red. Upstream moved to \`${DIGEST}\` and something the plugin"
+              echo "depends on moved with it."
+            } >> record.md
+          fi
+          {
+            echo ""
+            echo "---"
+            echo "<sub>Maintained by the devkit \`upstream-compat\` workflow. The body is"
+            echo "replaced in place — no commits, no pull requests. This issue opens when a"
+            echo "plugin breaks against upstream and closes automatically when the fleet is"
+            echo "green, so an OPEN issue always means action is needed.</sub>"
+          } >> record.md
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat record.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guard against a silent no-op
+        # The devkit-sync failure mode, made impossible: if the probe said "fan
+        # out" then the matrix MUST have produced a result. A green report with
+        # nothing tested is a bug, not a pass.
+        env:
+          CHANGED: ${{ needs.probe.outputs.changed }}
+          COMPAT: ${{ needs.compat.result }}
+        run: |
+          if [ "$CHANGED" = "true" ] && { [ -z "$COMPAT" ] || [ "$COMPAT" = "skipped" ]; }; then
+            echo "::error::probe requested a full run but the compat matrix never executed"
+            exit 1
+          fi
+          echo "no-op guard OK (changed=$CHANGED compat=${COMPAT:-none})"
+
+      - name: Upsert the record issue
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TITLE: "Upstream compatibility — agent0ai/agent-zero:latest"
+          BODY_FILE: record.md
+          LABEL: upstream-compat
+          MODE: only-on-failure
+          STATUS: ${{ steps.rec.outputs.status }}
+        run: bash e2e/ci/upsert-record-issue.sh
+
+      - name: Record the tested digest
+        # Written only on a GREEN full run, so a red night is retried tomorrow
+        # instead of being cached away as "already checked".
+        if: needs.compat.result == 'success'
+        run: |
+          printf 'digest=%s\nts=%s\n' "${{ needs.probe.outputs.digest }}" "$(date +%s)" \
+            > .upstream-compat-state
+
+      - name: Save digest cache
+        if: needs.compat.result == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .upstream-compat-state
+          key: upstream-compat-${{ needs.probe.outputs.digest }}
+
+      - name: Fail the run when a plugin is broken
+        # The nightly's own red X is the primary signal — Actions emails the
+        # workflow owner on a scheduled-run failure, which is the "signal someone
+        # sees" requirement. The issue is the durable second channel.
+        if: steps.rec.outputs.status == 'fail'
+        run: |
+          echo "::error::one or more plugins fail against the latest upstream A0"
+          exit 1

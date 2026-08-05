@@ -1,0 +1,37 @@
+# ci-budget — caller template.
+#
+# Copied into a consumer plugin repo at .github/workflows/ci-budget.yml by
+# `make link-workflows`. Refreshes the plugin's CI budget / e2e record:
+# a job summary, a ci-budget.json artifact, and one long-lived record issue
+# updated in place (no commits, no PRs).
+#
+# Weekly, not per-PR: the record is a rolling 30-day view, so refreshing it on
+# every PR would spend runner time to change a timestamp. It is also
+# workflow_dispatch-able for an on-demand read.
+name: ci-budget
+
+on:
+  schedule:
+    # Mondays 06:40 UTC. Off the hour (GitHub's :00 queues are the worst) and
+    # early enough that the record is fresh when the week starts.
+    - cron: "40 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Rolling window in days"
+        type: string
+        default: "30"
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  budget:
+    uses: agent-zero-plugins/agent-zero-plugin-development-testkit/.github/workflows/ci-budget.yml@main
+    # Forwards BILLING_READ_TOKEN if the org has set it. Absent → the record
+    # honestly reports billed minutes as unavailable rather than guessing.
+    secrets: inherit
+    with:
+      window-days: ${{ fromJSON(inputs.window_days || '30') }}

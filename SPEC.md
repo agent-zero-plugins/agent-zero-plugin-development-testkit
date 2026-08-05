@@ -1255,8 +1255,30 @@ job disappeared when the devkit went public. The real cost is **integrity and bl
 unreviewed merge changes CI in 24 repos with no canary and no rollback boundary. Fixed as change
 management, not as a breach.
 
+**DEC-082 — Upstream A0 compatibility is tested, because upstream is the only consumer.**
+The reusable workflow defaults `a0_image` to the private fork
+(`ghcr.io/nuevanext/agent-zero:latest-nonroot`) and **none of the four plugins overrode it**, so every
+PR proved the plugin worked on the fork and nothing anywhere proved it worked on upstream — which is
+the only thing anyone actually runs. That is not a gap in coverage so much as coverage pointed at the
+wrong target.
+Two changes, deliberately separate. Each plugin sets `a0_image` to
+`docker.io/agent0ai/agent-zero:latest` in its own `.devkit.yml`, so the **PR gate** now tests what
+customers run — a break is caught before merge, by the author, with the diff in front of them. And a
+scheduled `upstream-compat` workflow re-runs the same suites when **upstream** moves, which no PR can
+catch because nothing in the repo changed.
+*Why this schedule is not the one that was just deleted (DEC-079).* That one opened a PR every night
+whether or not anything had changed, and failed silently behind an approval gate for three weeks. This
+one is gated on the upstream manifest **digest** actually moving — measured, upstream ships ~1.5×/week
+against a 42-minute fan-out, so digest-gating costs ~295 runner-min/month instead of ~1,275 for the
+same ≤24h detection. It opens no PRs, commits nothing, and reports failure as a single issue that
+auto-closes when green, so an open issue always means act. Three structural guards keep it honest: the
+probe hard-fails rather than shrugging, an empty matrix is an error rather than a vacuous pass, and the
+report job asserts the matrix ran if the probe asked for it.
+The runs pin the resolved **digest**, not `:latest`, so a failure is reproducible against the exact
+image that broke it rather than whatever `:latest` points at by the time someone investigates.
+
 > **Numbering note:** DEC-070–072 were originally introduced as code comments only. They are now
-> written up above, so this section documents an unbroken 070–081. The lesson is worth keeping: a
+> written up above, so this section documents an unbroken 070–082. The lesson is worth keeping: a
 > decision that exists only as a code comment is invisible to anyone reading the SPEC, and all three
 > of these were load-bearing (a gate's timeout budget, the image the whole fleet pulls, and a wait
 > that was flaking half the runs).
