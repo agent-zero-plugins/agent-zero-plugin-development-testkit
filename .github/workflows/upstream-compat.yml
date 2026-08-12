@@ -91,7 +91,7 @@ jobs:
 
       - name: Look up last-tested digest
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           # Cache HIT on this exact digest ⇒ we already ran the full matrix
           # against this image. No commits, no state file, no PR.
@@ -411,7 +411,7 @@ jobs:
 
       - name: Save digest cache
         if: needs.compat.result == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .upstream-compat-state
           key: upstream-compat-${{ needs.probe.outputs.digest }}
