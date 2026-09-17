@@ -10,6 +10,18 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.2.0 — unreleased
+
+- **New: root-layout plugin repos are fully supported** (DEC-083). A repo with `.devkit.yml
+`plugin_dir: .`— the layout hub installs require, since A0 git-clones the repo into`usr/plugins/<name>` as-is — now passes the whole-tree audits: the dependency sweep, the A0-API
+sweep, and the validator skip repo scaffolding (`tests/`+ the vendored`_testkit`, caller
+workflows, local agent dirs, build output), mirroring the reusable workflow's zip excludes so
+"audited" and "shipped" cover the same files. `manifest.name.dir_mismatch`is enforced only for
+subdir layouts (runtime installs always land in`usr/plugins/<name>`). No-op for subdir layouts.
+- `make package` now uses the same exclude list as the reusable workflow's zip step, so a local
+  root-layout zip doesn't pack `.git`, the `_testkit` submodule, or caller workflows. No-op for
+  subdir layouts.
+
 ## v2.1.6 — 2026-08-05
 
 - **New: `make docs`** (DEC-077). Builds `docs/BEHAVIOUR.md` + `docs/screenshots/` from the plugin's
@@ -52,7 +64,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
   harnesses, `e2e/ci/prune-artifacts.sh` invoked by both workflows.
 
 - **Fix: e2e runs uploaded a near-empty artifact.** Two independent defects, both of which made a
-  *green* run undiagnosable. (1) `trace: retain-on-failure` meant a passing run produced no trace at
+  _green_ run undiagnosable. (1) `trace: retain-on-failure` meant a passing run produced no trace at
   all, so there was no ground truth to diff a later regression against — traces are now **always
   captured** (DEC-073), still overridable via `BDD_TRACE`. (2) Both harnesses (`run-bdd.sh` **and**
   `run-lifecycle.sh`) copied only `trace.zip`, silently dropping the `.png`/`.webm` Playwright writes
@@ -81,7 +93,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 ## v2.1.2 — 2026-07-04
 
 - **Skills: durable debugging/lifecycle learnings (from the chat-radar v2 adoption).**
-  - `a0-plugin-e2e-bdd` → "Debugging & harness truths": isolate what a symptom *proves* before fixing
+  - `a0-plugin-e2e-bdd` → "Debugging & harness truths": isolate what a symptom _proves_ before fixing
     (renders-blank-live = environment/global-collision; renders-in-pod-but-empty = data/seed, e.g. an
     `/import_chat` 404); an asserting test can encode the wrong spec intent; harness plumbing (features/
     flips the harness + retires the seed hook, filesystem seed seam via `A0_CONTAINER`, fresh page +
@@ -97,7 +109,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 
 - **Skill (`a0-plugin-e2e-bdd`): fixture patterns for seamless UI plugins.** Captures the three patterns
   proven across share-chat / fullscreen-toggle / mermaid-diagrams / diff-visualizer / chat-comments —
-  pure-UI control, render-a-code-block (inject the node A0 emits; wait for the CDN renderer *before*
+  pure-UI control, render-a-code-block (inject the node A0 emits; wait for the CDN renderer _before_
   injecting; assert the rendered output, not the transient `data-…-processed` marker; feed diff2html a
   full git diff), and store-driven (drive public store methods, assert observable effects) — plus the
   local-A0 boot gotcha (neutralize `run_sshd`; reinstall chromium after cache eviction).
@@ -109,7 +121,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
   `npx playwright show-trace <file>` or trace.playwright.dev. Both harnesses (`run-bdd`, `run-lifecycle`)
   collect `trace.zip`; the flaky `ffmpeg`→GIF step is gone. Artifact renamed `e2e-recording-*` → `e2e-traces-*`.
 - **Capture scope:** failing scenarios by default (`retain-on-failure`). Run the `plugin-e2e` workflow via
-  **workflow_dispatch with `capture_all_traces: true`** to capture a trace for *every* scenario
+  **workflow_dispatch with `capture_all_traces: true`** to capture a trace for _every_ scenario
   (threads through to `BDD_TRACE=on`). Locally: `BDD_TRACE=on make e2e`.
 - Consumers re-run `make link-workflows` to pick up the new dispatch input (the default already flows via `@main`).
 
@@ -120,7 +132,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
   (`plugin_dir: usr/plugins/<name>`) where the lint previously looked in the wrong place. No effect on
   root-layout plugins.
 
-## v2.0.0 — 2026-07-04  (BREAKING)
+## v2.0.0 — 2026-07-04 (BREAKING)
 
 - **BDD behaviour tests are now mandatory** (DEC-069). `bdd_lint` **hard-fails a plugin with no
   `tests/e2e/features/`** — the previous "self-skip for non-BDD plugins" was a silent loophole (no tests
