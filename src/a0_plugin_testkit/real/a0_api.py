@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from ..scan_scope import is_repo_scaffolding
+
 # A0-internal top-level modules whose attribute access we'll track. Anything
 # else (stdlib, pip packages) is out of scope for this check.
 _A0_INTERNAL_TOPLEVEL = frozenset({
@@ -212,6 +214,8 @@ def audit_a0_api_usage(
 
     audit = A0ApiAudit(plugin_dir=plugin_dir, a0_root=a0_root)
     for py in plugin_dir.rglob("*.py"):
+        if is_repo_scaffolding(py.relative_to(plugin_dir).as_posix()):
+            continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8", errors="ignore"))
         except SyntaxError:

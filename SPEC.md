@@ -1277,6 +1277,25 @@ report job asserts the matrix ran if the probe asked for it.
 The runs pin the resolved **digest**, not `:latest`, so a failure is reproducible against the exact
 image that broke it rather than whatever `:latest` points at by the time someone investigates.
 
+
+**DEC-083 — Root-layout plugin repos: the whole-tree audits scan shipped plugin code, not repo scaffolding.**
+A root-layout repo (`.devkit.yml` `plugin_dir: .`) is its own plugin dir — required for hub installs,
+which `git clone` the repo and drop it into `usr/plugins/<name>` as-is — so its dev scaffolding sits
+*inside* the tree the audits sweep: the test suite with the vendored `_testkit` submodule (and its
+nested `.agent-zero`), caller workflows, local agent dirs, build output. Against such a tree the
+dependency audit flags `pytest` and friends as undeclared, the A0-API audit cross-references A0's own
+source and fails on it, and the validator demands dir-name == plugin-name against what is actually
+the repo name. All three are false alarms about code that never ships.
+The fix follows the packaging contract rather than inventing a second rule: the reusable workflow's
+zip step already excludes exactly these trees for root-layout plugins, so "audited" and "shipped"
+now cover the same files. One predicate (`a0_plugin_testkit.scan_scope.is_repo_scaffolding`, first
+path segment match against the zip-exclude set) gates the dependency sweep, the A0-API sweep, and
+the validator's `__pycache__` scan. `manifest.name.dir_mismatch` is enforced only when the plugin
+dir has no `.devkit.yml` — at runtime A0 always installs into `usr/plugins/<name>`, so the invariant
+still holds where it matters.
+No-op for subdir layouts: none of the scaffolding folders sit inside a nested plugin dir, so
+previously-green consumers behave identically (MINOR, not MAJOR).
+
 > **Numbering note:** DEC-070–072 were originally introduced as code comments only. They are now
 > written up above, so this section documents an unbroken 070–082. The lesson is worth keeping: a
 > decision that exists only as a code comment is invisible to anyone reading the SPEC, and all three

@@ -81,10 +81,16 @@ link-gemini: ## copy the .gemini AI-reviewer styleguide into this repo (DEC-066)
 build: ## assemble the plugin dir (no-op for source-only plugins)
 	@echo "build: nothing to assemble for '$(PLUGIN_NAME)'"
 
+# Mirrors the reusable plugin-e2e workflow's zip excludes so root-layout
+# plugins (.devkit.yml plugin_dir: .) don't pack .git, the _testkit submodule,
+# caller workflows, etc. into the zip. No-ops for subdir layouts. The last
+# three are local-only build output that never exists on a CI runner.
 package: ## produce the versioned plugin zip from $(PLUGIN_DIR)
 	@mkdir -p $(DIST_DIR)
 	@rm -f $(PLUGIN_ZIP)
-	cd $(PLUGIN_DIR) && zip -qr $(abspath $(PLUGIN_ZIP)) . -x '*.DS_Store' 'tests/*' '.github/*' '*/node_modules/*'
+	cd $(PLUGIN_DIR) && zip -qr $(abspath $(PLUGIN_ZIP)) . \
+		-x '*.DS_Store' '.git/*' 'tests/*' '.github/*' '.skills/*' 'dist/*' '*/node_modules/*' \
+		   '.devkit.yml' '.gitmodules' '.gitignore' '.claude/*' '.gemini/*' 'artifacts/*'
 	@echo "packaged → $(PLUGIN_ZIP)"
 
 e2e: package ## behaviour BDD if tests/e2e/features/ exists, else classic lifecycle — in the devcontainer
