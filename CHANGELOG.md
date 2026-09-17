@@ -10,7 +10,7 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
-## v2.2.0 — unreleased
+## v2.2.0 — 2026-09-17
 
 - **New: root-layout plugin repos are fully supported** (DEC-083). A repo with `.devkit.yml
 `plugin_dir: .`— the layout hub installs require, since A0 git-clones the repo into`usr/plugins/<name>` as-is — now passes the whole-tree audits: the dependency sweep, the A0-API
