@@ -23,6 +23,7 @@ from ..discovery import (
     discover_html_surfaces,
     discover_js_hooks,
 )
+from ..scan_scope import is_repo_scaffolding
 
 
 _NAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -147,7 +148,11 @@ def _check_manifest(plugin_dir: Path) -> list[ValidationFinding]:
                 message=f"plugin name {name!r} must match {_NAME_RE.pattern}",
                 path="plugin.yaml",
             ))
-        if name != plugin_dir.name:
+        # Root-layout plugins (.devkit.yml plugin_dir: .) ARE the repo, so the
+        # audited dir carries the repo name, not the plugin name. At runtime
+        # A0 always installs into usr/plugins/<name>, so the invariant still
+        # holds where it matters — only enforce it for subdir layouts.
+        if name != plugin_dir.name and not (plugin_dir / ".devkit.yml").is_file():
             findings.append(ValidationFinding(
                 check="manifest",
                 severity="error",
@@ -218,12 +223,15 @@ def _check_structure(plugin_dir: Path) -> list[ValidationFinding]:
     # Catch __pycache__ accidentally zipped in.
     pycache_dirs = list(plugin_dir.rglob("__pycache__"))
     for pd in pycache_dirs:
+        rel = pd.relative_to(plugin_dir).as_posix()
+        if is_repo_scaffolding(rel):
+            continue
         findings.append(ValidationFinding(
             check="structure",
             severity="warning",
             code="structure.pycache",
             message="__pycache__ directory present — should be gitignored / zip-excluded",
-            path=str(pd.relative_to(plugin_dir)),
+            path=rel,
         ))
 
     # config.html must coexist with settings_sections (warn, don't error).

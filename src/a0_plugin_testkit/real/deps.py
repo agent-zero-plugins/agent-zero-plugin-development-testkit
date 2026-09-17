@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..scan_scope import is_repo_scaffolding
+
 # --------------------------------------------------------------------------- #
 # Knowledge base
 # --------------------------------------------------------------------------- #
@@ -249,6 +251,8 @@ def audit_dependencies(
     undeclared: list[_ImportSite] = []
     for py in plugin_dir.rglob("*.py"):
         rel = py.relative_to(plugin_dir).as_posix()
+        if is_repo_scaffolding(rel):
+            continue
         for site in _extract_top_level_imports(py):
             mod = _norm(site.module)
             if mod in _STDLIB or mod in _A0_INTERNAL:
