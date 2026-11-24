@@ -43,7 +43,7 @@ export class LoginPage {
     // hydration speed, so bound it generously — consistent with PluginsPage's
     // 8s/20s/10s landmark waits.
     await expect(
-      this.page.getByRole("button", { name: "Plugins", exact: true }),
+      this.page.locator("#header-plugins"),
     ).toBeVisible({ timeout: 30_000 });
   }
 }
