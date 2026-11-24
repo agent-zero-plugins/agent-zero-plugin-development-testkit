@@ -10,6 +10,10 @@ the frozen Make target contract (SPEC Appendix E.1), the reusable workflow input
 `Makefile.devkit` / `.devkit.yml` interface, or a tightening of the enforcement gates.
 **MINOR** = new backward-compatible targets/checks/assets. **PATCH** = fixes that don't change the contract.
 
+## v2.2.1 — 2026-11-24
+
+- **fix(pages): post-login landmark targets the header `#header-plugins` button.** Upstream A0's post-login screen now renders a second "Plugins" button (a welcome action card), so `LoginPage.login`'s `getByRole("button", { name: "Plugins", exact: true })` resolved to 2 elements and every consumer's e2e — red-proof included — failed at login with a strict-locator violation before any scenario body ran. The landmark is now the header button's stable id, validated against `docker.io/agent0ai/agent-zero:latest` (full plugin BDD suite: 9/9 scenarios green). No contract change.
+
 ## v2.2.0 — 2026-09-17
 
 - **New: root-layout plugin repos are fully supported** (DEC-083). A repo with `.devkit.yml
